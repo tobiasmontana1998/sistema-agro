@@ -8,7 +8,6 @@ export default function LaboresPorLote() {
   const [loteSeleccionado, setLoteSeleccionado] = useState<string | null>(null);
   const [labores, setLabores] = useState<any[]>([]);
 
-  // 🔹 Cargar lotes
   useEffect(() => {
     const cargarLotes = async () => {
       const { data } = await supabase
@@ -22,21 +21,15 @@ export default function LaboresPorLote() {
     cargarLotes();
   }, []);
 
-  // 🔹 Cargar labores del lote seleccionado
   useEffect(() => {
     if (!loteSeleccionado) return;
 
     const cargarLabores = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("labores")
         .select("id, numero, Tipo, Fecha, Costo_total")
         .eq("Lote_id", loteSeleccionado)
         .order("Fecha", { ascending: false });
-
-      if (error) {
-        console.error(error);
-        return;
-      }
 
       setLabores(data || []);
     };
@@ -44,12 +37,10 @@ export default function LaboresPorLote() {
     cargarLabores();
   }, [loteSeleccionado]);
 
-  // 🔴 ✅ ELIMINAR LABOR (con validación)
   const eliminarLabor = async (id: string) => {
     const confirmar = confirm("¿Querés eliminar esta labor?");
     if (!confirmar) return;
 
-    // ✅ verificar si tiene gastos
     const { data } = await supabase
       .from("facturas")
       .select("id")
@@ -60,18 +51,8 @@ export default function LaboresPorLote() {
       return;
     }
 
-    // ✅ eliminar
-    const { error } = await supabase
-      .from("labores")
-      .delete()
-      .eq("id", id);
+    await supabase.from("labores").delete().eq("id", id);
 
-    if (error) {
-      alert("Error eliminando labor");
-      return;
-    }
-
-    // ✅ actualizar tabla
     setLabores((prev) => prev.filter((l) => l.id !== id));
   };
 
@@ -92,11 +73,10 @@ export default function LaboresPorLote() {
 
       {loteSeleccionado && (
         <>
-          <hr />
           <h3>Labores</h3>
 
           {labores.length === 0 ? (
-            <p>No hay labores para este lote</p>
+            <p>No hay labores</p>
           ) : (
             <table border={1} cellPadding={8}>
               <thead>
@@ -115,13 +95,11 @@ export default function LaboresPorLote() {
                     <td>{l.Tipo}</td>
                     <td>{l.Fecha}</td>
                     <td>{l.Costo_total}</td>
-
                     <td>
                       <button onClick={() => eliminarLabor(l.id)}>
                         ❌
                       </button>
                     </td>
-
                   </tr>
                 ))}
               </tbody>

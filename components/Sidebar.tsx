@@ -40,7 +40,6 @@ export default function Sidebar() {
 
         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
           <Link href="/agricultura/nueva-labor">Cargar labor</Link>
-          <Link href="/agricultura/labores">Labores</Link>
           <Link href="/agricultura/labores-por-lote">Labores por lote</Link>
         </div>
       </div>
