@@ -13,6 +13,7 @@ export default function CargarFacturas() {
   const [laborId, setLaborId] = useState("");
   const [actividadId, setActividadId] = useState("");
   const [labores, setLabores] = useState<any[]>([]);
+  const [pagador, setPagador] = useState("");
   const [actividades, setActividades] = useState<any[]>([]);
 
   // 🔹 Cargar labores (para asociar factura)
@@ -55,6 +56,10 @@ export default function CargarFacturas() {
       alert("Completá todos los campos obligatorios");
       return;
     }
+     if (!pagador) {
+        alert("Seleccioná quién pagó");
+        return;
+      }
     
      if (!actividadId) {
        alert("Seleccioná una actividad");
@@ -70,6 +75,7 @@ export default function CargarFacturas() {
         "Tipo": tipo,
         "Monto": Number(monto),
         "Numero_factura": numeroFactura || null,
+        "Pagador": pagador,
         "Actividad_id": actividadId,
         "Labor_id": laborId || null,
       },
@@ -93,6 +99,7 @@ export default function CargarFacturas() {
     setTipo("");
     setMonto("");
     setLaborId("");
+    setPagador("");
   };
 
   return (
@@ -162,7 +169,20 @@ export default function CargarFacturas() {
       </div>
 
       <br />
-      
+ <div>
+  <label>Quién pagó</label>
+  <br />
+  <select
+    value={pagador}
+    onChange={(e) => setPagador(e.target.value)}
+  >
+    <option value="">Seleccionar</option>
+    <option value="CT">C/T</option>
+    <option value="OC">O/C</option>
+    <option value="Sociedad">Sociedad</option>
+  </select>
+</div>     
+   <br />   
 
 <div>
   <label>Actividad</label>
