@@ -9,15 +9,17 @@ export default function RootLayout({
     <html lang="es">
       <body>
         <nav style={{ padding: 20, borderBottom: "1px solid #ccc" }}>
-       <Link href="/">Inicio</Link>
-        {" | "}
-       <Link href="/labores">Labores</Link>
-       </nav>
-
+          <Link href="/">Inicio</Link>
+          {" | "}
+          <Link href="/agricultura">Agricultura</Link>
+          {" | "}
+          <Link href="/control-gestion">Control de gestión</Link>
+        </nav>
 
         <main>{children}</main>
       </body>
     </html>
   );
 }
+
 
