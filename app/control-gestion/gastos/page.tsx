@@ -11,28 +11,25 @@ export default function Gastos() {
     const cargarGastos = async () => {
       const { data, error } = await supabase
         .from("facturas")
-        
-.select(`
-  id,
-  Fecha,
-  Proveedor,
-  Numero_factura,
-  Concepto,
-  Tipo,
-  Pagador,
-  Monto,
-  actividades ( nombre ),
-  labores ( numero )
-`)
-
+        .select(`
+          id,
+          Fecha,
+          Fecha_vencimiento,
+          Proveedor,
+          Numero_factura,
+          Concepto,
+          Tipo,
+          Pagador,
+          Monto,
+          actividades ( nombre ),
+          labores ( numero )
+        `)
         .order("Fecha", { ascending: false });
 
       if (error) {
         console.error(error);
         return;
       }
-
-      console.log("GASTOS:", data); // DEBUG
 
       setGastos(data || []);
     };
@@ -42,39 +39,48 @@ export default function Gastos() {
 
   // 🔹 Eliminar gasto
   const eliminarGasto = async (id: string) => {
-      const confirmar = confirm("¿Estás seguro que querés eliminar este gasto?");
+    const confirmar = confirm("¿Estás seguro que querés eliminar este gasto?");
+    if (!confirmar) return;
 
-      if (!confirmar) return;
-
-      const { error } = await supabase
-       .from("facturas")
+    const { error } = await supabase
+      .from("facturas")
       .delete()
       .eq("id", id);
 
-      if (error) {
-       alert("Error eliminando gasto");
-       return;
-      }
+    if (error) {
+      alert("Error eliminando gasto");
+      return;
+    }
 
-     setGastos((prev) => prev.filter((g) => g.id !== id));
+    setGastos((prev) => prev.filter((g) => g.id !== id));
   };
-  const exportarCSV = () => {
+
+  // 🔹 Exportar Excel
+ const exportarCSV = () => {
   const encabezado = [
-    "Fecha",
+    "Fecha emisión",
+    "Fecha vencimiento",
+    "Proveedor",
+    "N° factura",
     "Concepto",
     "Tipo",
     "Pagador",
     "Actividad",
     "Monto",
+    "Labor",
   ];
 
   const filas = gastos.map((g) => [
     g.Fecha,
+    g.Fecha_vencimiento,
+    g.Proveedor,
+    g.Numero_factura,
     g.Concepto,
     g.Tipo,
     g.Pagador,
     g.actividades?.nombre,
     g.Monto,
+    g.labores ? `#${g.labores.numero}` : "-",
   ]);
 
   const csv = [encabezado, ...filas]
@@ -93,9 +99,10 @@ export default function Gastos() {
   return (
     <div style={{ padding: 40 }}>
       <h1>Gastos</h1>
+
       <button onClick={exportarCSV}>
-  Exportar a Excel
-</button>
+        Exportar a Excel
+      </button>
 
       {gastos.length === 0 ? (
         <p>No hay gastos cargados</p>
@@ -103,19 +110,17 @@ export default function Gastos() {
         <table border={1} cellPadding={8}>
           <thead>
             <tr>
-              
-<th>Fecha</th>
-<th>Proveedor</th>
-<th>N° Factura</th>
-<th>Concepto</th>
-<th>Tipo</th>
-<th>Pagó</th>
-<th>Actividad</th>
-<th>Monto</th>
-<th>Labor</th>
-<th>Eliminar</th>
-
-              
+              <th>F. Emisión</th>
+              <th>F. Vto</th>
+              <th>Proveedor</th>
+              <th>N° Factura</th>
+              <th>Concepto</th>
+              <th>Tipo</th>
+              <th>Pagó</th>
+              <th>Actividad</th>
+              <th>Monto</th>
+              <th>Labor</th>
+              <th>Eliminar</th>
             </tr>
           </thead>
 
@@ -123,26 +128,18 @@ export default function Gastos() {
             {gastos.map((g) => (
               <tr key={g.id}>
                 <td>{g.Fecha}</td>
-<td>{g.Proveedor}</td>
-<td>{g.Numero_factura}</td>
-<td>{g.Concepto}</td>
-<td>{g.Tipo}</td>
-<td>{g.Pagador}</td>
-<td>{g.actividades?.nombre}</td>
-<td>{g.Monto}</td>
+                <td>{g.Fecha_vencimiento}</td>
+                <td>{g.Proveedor}</td>
+                <td>{g.Numero_factura}</td>
+                <td>{g.Concepto}</td>
+                <td>{g.Tipo}</td>
+                <td>{g.Pagador}</td>
+                <td>{g.actividades?.nombre}</td>
+                <td>{g.Monto}</td>
 
-<td>
-  {g.labores
-    ? `#${g.labores.numero}`
-    : "-"}
-</td>
-
-
-
-
-
-
-
+                <td>
+                  {g.labores ? `#${g.labores.numero}` : "-"}
+                </td>
 
                 <td>
                   <button onClick={() => eliminarGasto(g.id)}>

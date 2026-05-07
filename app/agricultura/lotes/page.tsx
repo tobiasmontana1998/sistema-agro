@@ -26,22 +26,54 @@ export default function LaboresPorLote() {
   useEffect(() => {
     if (!loteSeleccionado) return;
 
-    console.log("BUSCANDO LABORES DEL LOTE:", loteSeleccionado);
-
     const cargarLabores = async () => {
       const { data, error } = await supabase
         .from("labores")
-        .select("id, Tipo, Fecha, Costo_total")
+        .select("id, numero, Tipo, Fecha, Costo_total")
         .eq("Lote_id", loteSeleccionado)
         .order("Fecha", { ascending: false });
 
-      console.log("LABORES OBTENIDAS:", data, error);
+      if (error) {
+        console.error(error);
+        return;
+      }
 
       setLabores(data || []);
     };
 
     cargarLabores();
   }, [loteSeleccionado]);
+
+  // 🔴 ✅ ELIMINAR LABOR (con validación)
+  const eliminarLabor = async (id: string) => {
+    const confirmar = confirm("¿Querés eliminar esta labor?");
+    if (!confirmar) return;
+
+    // ✅ verificar si tiene gastos
+    const { data } = await supabase
+      .from("facturas")
+      .select("id")
+      .eq("Labor_id", id);
+
+    if (data && data.length > 0) {
+      alert("No se puede eliminar: esta labor tiene gastos asociados");
+      return;
+    }
+
+    // ✅ eliminar
+    const { error } = await supabase
+      .from("labores")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Error eliminando labor");
+      return;
+    }
+
+    // ✅ actualizar tabla
+    setLabores((prev) => prev.filter((l) => l.id !== id));
+  };
 
   return (
     <div style={{ padding: 40 }}>
@@ -69,17 +101,27 @@ export default function LaboresPorLote() {
             <table border={1} cellPadding={8}>
               <thead>
                 <tr>
+                  <th>#</th>
                   <th>Tipo</th>
                   <th>Fecha</th>
                   <th>Costo</th>
+                  <th>Eliminar</th>
                 </tr>
               </thead>
               <tbody>
                 {labores.map((l) => (
                   <tr key={l.id}>
+                    <td>#{l.numero}</td>
                     <td>{l.Tipo}</td>
                     <td>{l.Fecha}</td>
                     <td>{l.Costo_total}</td>
+
+                    <td>
+                      <button onClick={() => eliminarLabor(l.id)}>
+                        ❌
+                      </button>
+                    </td>
+
                   </tr>
                 ))}
               </tbody>

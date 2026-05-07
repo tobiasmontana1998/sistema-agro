@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 
 export default function CargarFacturas() {
   const [fecha, setFecha] = useState("");
+  const [fechaVencimiento, setFechaVencimiento] = useState("");
   const [proveedor, setProveedor] = useState("");
   const [concepto, setConcepto] = useState("");
   const [tipo, setTipo] = useState("");
@@ -66,20 +67,20 @@ export default function CargarFacturas() {
        return;
       }
 
-
-    const { error } = await supabase.from("facturas").insert([
-      {
-        "Fecha": fecha,
-        "Proveedor": proveedor,
-        "Concepto": concepto,
-        "Tipo": tipo,
-        "Monto": Number(monto),
-        "Numero_factura": numeroFactura || null,
-        "Pagador": pagador,
-        "Actividad_id": actividadId,
-        "Labor_id": laborId || null,
-      },
-    ]);
+const { error } = await supabase.from("facturas").insert([
+  {
+    "Fecha": fecha, // ✅ emisión
+    "Fecha_vencimiento": fechaVencimiento || null,
+    "Proveedor": proveedor,
+    "Concepto": concepto,
+    "Tipo": tipo,
+    "Monto": Number(monto),
+    "Numero_factura": numeroFactura || null,
+    "Pagador": pagador,
+    "Actividad_id": actividadId,
+    "Labor_id": laborId || null,
+  },
+]);
 
     if (error) {
       console.error("ERROR SUPABASE:", error);
@@ -93,6 +94,7 @@ export default function CargarFacturas() {
 
     // limpiar formulario
     setFecha("");
+    setFechaVencimiento("");
     setProveedor("");
     setConcepto("");
     setNumeroFactura("");
@@ -107,7 +109,7 @@ export default function CargarFacturas() {
       <h1>Cargar facturas</h1>
 
       <div>
-        <label>Fecha</label>
+        <label>Fecha de emisión</label>
         <br />
         <input
           type="date"
@@ -117,6 +119,19 @@ export default function CargarFacturas() {
       </div>
 
       <br />
+
+
+<div>
+  <label>Fecha de vencimiento</label>
+  <br />
+  <input
+    type="date"
+    value={fechaVencimiento}
+    onChange={(e) => setFechaVencimiento(e.target.value)}
+  />
+</div>
+
+<br/>
 
       <div>
         <label>Proveedor</label>

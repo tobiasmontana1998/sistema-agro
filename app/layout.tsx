@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Sidebar from "@/components/Sidebar";
 
 export default function RootLayout({
   children,
@@ -8,18 +8,18 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
-        <nav style={{ padding: 20, borderBottom: "1px solid #ccc" }}>
-          <Link href="/">Inicio</Link>
-          {" | "}
-          <Link href="/agricultura">Agricultura</Link>
-          {" | "}
-          <Link href="/control-gestion">Control de gestión</Link>
-        </nav>
+        <div style={{ display: "flex" }}>
 
-        <main>{children}</main>
+          {/* ✅ Sidebar izquierda */}
+          <Sidebar />
+
+          {/* ✅ Contenido derecha */}
+          <div style={{ flex: 1, padding: 30 }}>
+            {children}
+          </div>
+
+        </div>
       </body>
     </html>
   );
 }
-
-

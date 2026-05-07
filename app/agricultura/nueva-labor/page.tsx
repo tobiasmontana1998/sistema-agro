@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 export default function CargarLabor() {
   const [cultivos, setCultivos] = useState<any[]>([]);
   const [lotes, setLotes] = useState<any[]>([]);
+  const [labores, setLabores] = useState<any[]>([]);
 
   const [tipo, setTipo] = useState("");
   const [cultivoId, setCultivoId] = useState("");
@@ -40,16 +41,28 @@ export default function CargarLabor() {
     cargarLotes();
   }, []);
 
-  // 🔹 Guardar labor (BLINDADO)
+  // 🔹 Cargar labores
+  useEffect(() => {
+    const cargarLabores = async () => {
+      const { data } = await supabase
+        .from("labores")
+        .select("*")
+        .order("Fecha", { ascending: false });
+
+      setLabores(data || []);
+    };
+
+    cargarLabores();
+  }, []);
+
+  // 🔹 Guardar labor
   const guardarLabor = async () => {
     if (!tipo || !cultivoId || !loteId) {
       alert("Faltan datos. El lote es obligatorio.");
       return;
     }
 
-    console.log("GUARDANDO LABOR CON LOTE:", loteId);
-
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("labores")
       .insert([
         {
@@ -57,12 +70,9 @@ export default function CargarLabor() {
           Fecha: new Date().toISOString().slice(0, 10),
           Costo_total: Number(costo),
           Cultivo_id: cultivoId,
-          Lote_id: loteId, // ✅ ESTO ES CLAVE
+          Lote_id: loteId,
         },
-      ])
-      .select();
-
-    console.log("RESPUESTA SUPABASE:", data, error);
+      ]);
 
     if (error) {
       alert("Error al guardar la labor");
@@ -72,11 +82,50 @@ export default function CargarLabor() {
 
     alert("Labor guardada ✅");
 
+    // recargar lista
+    const { data } = await supabase
+      .from("labores")
+      .select("*")
+      .order("Fecha", { ascending: false });
+
+    setLabores(data || []);
+
     // limpiar formulario
     setTipo("");
     setCultivoId("");
     setLoteId("");
     setCosto("");
+  };
+
+  // 🔴 ELIMINAR LABOR (OPCIÓN B)
+  const eliminarLabor = async (id: string) => {
+    const confirmar = confirm("¿Querés eliminar esta labor?");
+    if (!confirmar) return;
+
+    // ✅ verificar si tiene gastos
+    const { data } = await supabase
+      .from("facturas")
+      .select("id")
+      .eq("Labor_id", id);
+
+    if (data && data.length > 0) {
+      alert("No se puede eliminar: esta labor tiene gastos asociados");
+      return;
+    }
+
+    // ✅ eliminar
+    const { error } = await supabase
+      .from("labores")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Error eliminando labor");
+      return;
+    }
+
+    // ✅ actualizar UI
+    setLabores((prev) => prev.filter((l) => l.id !== id));
   };
 
   return (
@@ -122,10 +171,7 @@ export default function CargarLabor() {
         <br />
         <select
           value={loteId}
-          onChange={(e) => {
-            console.log("LOTE SELECCIONADO:", e.target.value);
-            setLoteId(e.target.value);
-          }}
+          onChange={(e) => setLoteId(e.target.value)}
         >
           <option value="">Seleccionar</option>
           {lotes.map((l) => (
@@ -151,6 +197,13 @@ export default function CargarLabor() {
       <br />
 
       <button onClick={guardarLabor}>Guardar labor</button>
+
+            
+        
+          
+      
+       
+    
     </div>
   );
 }
