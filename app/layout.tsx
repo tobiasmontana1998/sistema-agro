@@ -7,18 +7,27 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body>
+      <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
+        
         <div style={{ display: "flex" }}>
 
-          {/* ✅ Sidebar izquierda */}
+          {/* ✅ SIDEBAR */}
           <Sidebar />
 
-          {/* ✅ Contenido derecha */}
-          <div style={{ flex: 1, padding: 30 }}>
+          {/* ✅ CONTENIDO */}
+          <div
+            style={{
+              flex: 1,
+              padding: 40,
+              background: "#f4f6f9",   // 👈 fondo gris claro
+              minHeight: "100vh",
+            }}
+          >
             {children}
           </div>
 
         </div>
+
       </body>
     </html>
   );
