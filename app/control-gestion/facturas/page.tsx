@@ -3,72 +3,55 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function CargarFactura() {
+export default function NuevaLabor() {
 
-  // 🔹 Estados
-  const [fecha, setFecha] = useState("");
-  const [fechaVto, setFechaVto] = useState("");
-  const [proveedor, setProveedor] = useState("");
-  const [numeroFactura, setNumeroFactura] = useState("");
-  const [concepto, setConcepto] = useState("");
   const [tipo, setTipo] = useState("");
-  const [pagador, setPagador] = useState("");
-  const [monto, setMonto] = useState("");
+  const [cultivo, setCultivo] = useState("");
+  const [lote, setLote] = useState("");
+  const [costo, setCosto] = useState("");
+  const [observaciones, setObservaciones] = useState("");
 
-  const [actividad, setActividad] = useState("");
-  const [actividades, setActividades] = useState<any[]>([]);
+  const [lotes, setLotes] = useState<any[]>([]);
 
-  const [labor, setLabor] = useState("");
-  const [labores, setLabores] = useState<any[]>([]);
-
-  // ✅ Cargar actividades
+  // ✅ cargar lotes
   useEffect(() => {
     const fetch = async () => {
-      const { data } = await supabase.from("actividades").select();
-      setActividades(data || []);
+      const { data } = await supabase.from("lotes").select();
+      setLotes(data || []);
     };
     fetch();
   }, []);
 
-  // ✅ Cargar labores
-  useEffect(() => {
-    const fetch = async () => {
-      const { data } = await supabase.from("labores").select();
-      setLabores(data || []);
-    };
-    fetch();
-  }, []);
-
-  // ✅ Guardar factura
-  const guardarFactura = async () => {
-    if (!fecha || !proveedor || !monto) {
-      alert("Completá los campos obligatorios");
+  // ✅ guardar labor
+  const guardarLabor = async () => {
+    if (!tipo || !lote) {
+      alert("Faltan campos obligatorios");
       return;
     }
 
-    const { error } = await supabase.from("facturas").insert([
+    const { error } = await supabase.from("labores").insert([
       {
-        Fecha: fecha,
-        Fecha_vencimiento: fechaVto || null,
-        Proveedor: proveedor,
-        Numero_factura: numeroFactura,
-        Concepto: concepto,
         Tipo: tipo,
-        Pagador: pagador,
-        Monto: Number(monto),
-
-        Actividad_id: actividad || null,
-        Labor_id: labor || null,
+        Cultivo: cultivo,
+        Lote_id: lote,
+        Costo_total: Number(costo) || 0,
+        Observaciones: observaciones,
       },
     ]);
 
     if (error) {
       console.error(error);
-      alert("Error guardando");
+      alert("Error al guardar");
       return;
     }
 
-    alert("Factura guardada ✅");
+    alert("Labor guardada ✅");
+
+    setTipo("");
+    setCultivo("");
+    setLote("");
+    setCosto("");
+    setObservaciones("");
   };
 const cardStyle: React.CSSProperties = {
   background: "white",
@@ -97,6 +80,7 @@ const btnPrimary: React.CSSProperties = {
   color: "white",
   border: "none",
   borderRadius: 8,
+  cursor: "pointer",
 };
 
 const btnSecondary: React.CSSProperties = {
@@ -105,118 +89,94 @@ const btnSecondary: React.CSSProperties = {
   border: "none",
   borderRadius: 8,
 };
+
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
+
       <div style={{ width: "100%", maxWidth: 900 }}>
 
         <div style={cardStyle}>
 
-          <h1>Cargar facturas</h1>
+          <h1>Cargar Labor</h1>
 
           <p style={{ color: "#555", marginBottom: 25 }}>
-            Registro completo de gastos del sistema.
+            Registro de trabajos realizados en campo.
           </p>
 
-          {/* GRID */}
+          {/* ✅ GRID */}
           <div style={grid2}>
 
             <div>
-              <label>Fecha *</label>
-              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={inputStyle} />
-            </div>
-
-            <div>
-              <label>Vencimiento</label>
-              <input type="date" value={fechaVto} onChange={(e) => setFechaVto(e.target.value)} style={inputStyle} />
-            </div>
-
-            <div>
-              <label>Proveedor *</label>
-              <input value={proveedor} onChange={(e) => setProveedor(e.target.value)} style={inputStyle} />
-            </div>
-
-            <div>
-              <label>Factura</label>
-              <input value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} style={inputStyle} />
-            </div>
-
-          </div>
-
-          {/* CONCEPTO */}
-          <div style={{ marginTop: 20 }}>
-            <label>Concepto</label>
-            <textarea value={concepto} onChange={(e) => setConcepto(e.target.value)} style={{ ...inputStyle, height: 80 }} />
-          </div>
-
-          {/* ACTIVIDAD + LABOR */}
-          <div style={{ ...grid2, marginTop: 20 }}>
-
-            <div>
-              <label>Actividad</label>
-              <select value={actividad} onChange={(e) => setActividad(e.target.value)} style={inputStyle}>
-                <option value="">Seleccionar</option>
-                {actividades.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nombre}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label>Labor (opcional)</label>
-              <select value={labor} onChange={(e) => setLabor(e.target.value)} style={inputStyle}>
-                <option value="">Sin asociar</option>
-                {labores.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    #{l.numero} - {l.Tipo}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-          </div>
-
-          {/* TIPO + PAGADOR */}
-          <div style={{ ...grid2, marginTop: 20 }}>
-
-            <div>
-              <label>Tipo</label>
+              <label>Tipo de labor *</label>
               <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={inputStyle}>
                 <option value="">Seleccionar</option>
-                <option>Insumos</option>
-                <option>Servicios</option>
-                <option>Combustible</option>
+                <option>Siembra</option>
+                <option>Fertilización</option>
+                <option>Cosecha</option>
+                <option>Pulverización</option>
               </select>
             </div>
 
             <div>
-              <label>Pagador</label>
-              <select value={pagador} onChange={(e) => setPagador(e.target.value)} style={inputStyle}>
+              <label>Cultivo</label>
+              <select value={cultivo} onChange={(e) => setCultivo(e.target.value)} style={inputStyle}>
                 <option value="">Seleccionar</option>
-                <option>CT</option>
-                <option>OC</option>
-                <option>Sociedad</option>
+                <option>Soja</option>
+                <option>Maíz</option>
+                <option>Trigo</option>
               </select>
+            </div>
+
+            <div>
+              <label>Lote *</label>
+              <select value={lote} onChange={(e) => setLote(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                {lotes.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Costo total</label>
+              <input
+                type="number"
+                value={costo}
+                onChange={(e) => setCosto(e.target.value)}
+                style={inputStyle}
+                placeholder="$"
+              />
             </div>
 
           </div>
 
-          {/* MONTO */}
+          {/* ✅ OBSERVACIONES */}
           <div style={{ marginTop: 20 }}>
-            <label>Monto *</label>
-            <input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} style={inputStyle} />
+            <label>Observaciones</label>
+            <textarea
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+              style={{
+                ...inputStyle,
+                height: 100,
+              }}
+              placeholder="Detalles de la labor..."
+            />
           </div>
 
-          {/* BOTONES */}
+          {/* ✅ BOTONES */}
           <div style={{ marginTop: 30, display: "flex", gap: 10 }}>
-            <button onClick={guardarFactura} style={btnPrimary}>
-              💾 Guardar
+
+            <button onClick={guardarLabor} style={btnPrimary}>
+              💾 Guardar labor
             </button>
 
             <button style={btnSecondary}>
               Cancelar
             </button>
+
           </div>
 
         </div>
