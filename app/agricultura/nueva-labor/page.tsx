@@ -1,209 +1,176 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function CargarLabor() {
-  const [cultivos, setCultivos] = useState<any[]>([]);
-  const [lotes, setLotes] = useState<any[]>([]);
-  const [labores, setLabores] = useState<any[]>([]);
+export default function NuevaLabor() {
 
   const [tipo, setTipo] = useState("");
-  const [cultivoId, setCultivoId] = useState("");
-  const [loteId, setLoteId] = useState("");
+  const [cultivo, setCultivo] = useState("");
+  const [lote, setLote] = useState("");
   const [costo, setCosto] = useState("");
+  const [observaciones, setObservaciones] = useState("");
 
-  // 🔹 Cargar cultivos
+  const [lotes, setLotes] = useState<any[]>([]);
+
   useEffect(() => {
-    const cargarCultivos = async () => {
-      const { data } = await supabase
-        .from("cultivos")
-        .select("id, nombre");
-
-      setCultivos(data || []);
-    };
-
-    cargarCultivos();
-  }, []);
-
-  // 🔹 Cargar lotes
-  useEffect(() => {
-    const cargarLotes = async () => {
-      const { data } = await supabase
-        .from("lotes")
-        .select("id, nombre")
-        .order("nombre");
-
+    const fetch = async () => {
+      const { data } = await supabase.from("lotes").select();
       setLotes(data || []);
     };
-
-    cargarLotes();
+    fetch();
   }, []);
 
-  // 🔹 Cargar labores
-  useEffect(() => {
-    const cargarLabores = async () => {
-      const { data } = await supabase
-        .from("labores")
-        .select("*")
-        .order("Fecha", { ascending: false });
-
-      setLabores(data || []);
-    };
-
-    cargarLabores();
-  }, []);
-
-  // 🔹 Guardar labor
   const guardarLabor = async () => {
-    if (!tipo || !cultivoId || !loteId) {
-      alert("Faltan datos. El lote es obligatorio.");
+    if (!tipo || !lote) {
+      alert("Faltan campos obligatorios");
       return;
     }
 
-    const { error } = await supabase
-      .from("labores")
-      .insert([
-        {
-          Tipo: tipo,
-          Fecha: new Date().toISOString().slice(0, 10),
-          Costo_total: Number(costo),
-          Cultivo_id: cultivoId,
-          Lote_id: loteId,
-        },
-      ]);
+    const { error } = await supabase.from("labores").insert([
+      {
+        Tipo: tipo,
+        Cultivo: cultivo,
+        Lote_id: lote,
+        Costo_total: Number(costo) || 0,
+        Observaciones: observaciones,
+      },
+    ]);
 
     if (error) {
-      alert("Error al guardar la labor");
-      console.error(error);
+      alert("Error guardando");
       return;
     }
 
     alert("Labor guardada ✅");
-
-    // recargar lista
-    const { data } = await supabase
-      .from("labores")
-      .select("*")
-      .order("Fecha", { ascending: false });
-
-    setLabores(data || []);
-
-    // limpiar formulario
-    setTipo("");
-    setCultivoId("");
-    setLoteId("");
-    setCosto("");
   };
+const cardStyle: React.CSSProperties = {
+  background: "white",
+  padding: 30,
+  borderRadius: 12,
+  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+};
 
-  // 🔴 ELIMINAR LABOR (OPCIÓN B)
-  const eliminarLabor = async (id: string) => {
-    const confirmar = confirm("¿Querés eliminar esta labor?");
-    if (!confirmar) return;
+const grid2: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 20,
+};
 
-    // ✅ verificar si tiene gastos
-    const { data } = await supabase
-      .from("facturas")
-      .select("id")
-      .eq("Labor_id", id);
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: 10,
+  borderRadius: 8,
+  border: "1px solid #ccc",
+  marginTop: 5,
+};
 
-    if (data && data.length > 0) {
-      alert("No se puede eliminar: esta labor tiene gastos asociados");
-      return;
-    }
+const btnPrimary: React.CSSProperties = {
+  padding: "12px 20px",
+  background: "#0f3d2e",
+  color: "white",
+  border: "none",
+  borderRadius: 8,
+  cursor: "pointer",
+};
 
-    // ✅ eliminar
-    const { error } = await supabase
-      .from("labores")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      alert("Error eliminando labor");
-      return;
-    }
-
-    // ✅ actualizar UI
-    setLabores((prev) => prev.filter((l) => l.id !== id));
-  };
+const btnSecondary: React.CSSProperties = {
+  padding: "12px 20px",
+  background: "#eee",
+  border: "none",
+  borderRadius: 8,
+};
 
   return (
-    <div style={{ padding: 40 }}>
-      <Link href="/">← Volver al inicio</Link>
+    <div style={{ display: "flex", justifyContent: "center" }}>
 
-      <h1>Cargar Labor</h1>
+      <div style={{ width: "100%", maxWidth: 900 }}>
 
-      <div>
-        <label>Tipo de labor</label>
-        <br />
-        <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-          <option value="">Seleccionar</option>
-          <option value="pulverizacion">Pulverización</option>
-          <option value="siembra">Siembra</option>
-          <option value="cosecha">Cosecha</option>
-          <option value="fertilizacion">Fertilización</option>
-        </select>
+        <div style={cardStyle}>
+
+          <h1>Cargar Labor</h1>
+
+          <p style={{ color: "#555", marginBottom: 25 }}>
+            Registro de trabajos realizados en el lote.
+          </p>
+
+          {/* GRID */}
+          <div style={grid2}>
+
+            <div>
+              <label>Tipo de labor *</label>
+              <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                <option>Siembra</option>
+                <option>Fertilización</option>
+                <option>Pulverización</option>
+                <option>Cosecha</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Cultivo</label>
+              <select value={cultivo} onChange={(e) => setCultivo(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                <option>Soja</option>
+                <option>Maíz</option>
+                <option>Trigo</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Lote *</label>
+              <select value={lote} onChange={(e) => setLote(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                {lotes.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Costo total</label>
+              <input
+                type="number"
+                value={costo}
+                onChange={(e) => setCosto(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+          </div>
+
+          {/* OBSERVACIONES */}
+          <div style={{ marginTop: 20 }}>
+            <label>Observaciones</label>
+            <textarea
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+              style={{
+                ...inputStyle,
+                height: 100,
+              }}
+            />
+          </div>
+
+          {/* BOTONES */}
+          <div style={{ marginTop: 30, display: "flex", gap: 10 }}>
+
+            <button onClick={guardarLabor} style={btnPrimary}>
+              💾 Guardar labor
+            </button>
+
+            <button style={btnSecondary}>
+              Cancelar
+            </button>
+
+          </div>
+
+        </div>
+
       </div>
-
-      <br />
-
-      <div>
-        <label>Cultivo</label>
-        <br />
-        <select
-          value={cultivoId}
-          onChange={(e) => setCultivoId(e.target.value)}
-        >
-          <option value="">Seleccionar</option>
-          {cultivos.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <br />
-
-      <div>
-        <label>Lote</label>
-        <br />
-        <select
-          value={loteId}
-          onChange={(e) => setLoteId(e.target.value)}
-        >
-          <option value="">Seleccionar</option>
-          {lotes.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nombre}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <br />
-
-      <div>
-        <label>Costo total</label>
-        <br />
-        <input
-          type="number"
-          value={costo}
-          onChange={(e) => setCosto(e.target.value)}
-        />
-      </div>
-
-      <br />
-
-      <button onClick={guardarLabor}>Guardar labor</button>
-
-            
-        
-          
-      
-       
-    
     </div>
   );
 }
