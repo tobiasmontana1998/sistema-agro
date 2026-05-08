@@ -1,254 +1,217 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function CargarFacturas() {
+export default function CargarFactura() {
   const [fecha, setFecha] = useState("");
-  const [fechaVencimiento, setFechaVencimiento] = useState("");
+  const [fechaVto, setFechaVto] = useState("");
   const [proveedor, setProveedor] = useState("");
+  const [numeroFactura, setNumeroFactura] = useState("");
   const [concepto, setConcepto] = useState("");
   const [tipo, setTipo] = useState("");
-  const [monto, setMonto] = useState("");
-  const [numeroFactura, setNumeroFactura] = useState("");
-  const [laborId, setLaborId] = useState("");
-  const [actividadId, setActividadId] = useState("");
-  const [labores, setLabores] = useState<any[]>([]);
   const [pagador, setPagador] = useState("");
-  const [actividades, setActividades] = useState<any[]>([]);
+  const [monto, setMonto] = useState("");
 
-  // 🔹 Cargar labores (para asociar factura)
-  useEffect(() => {
-    const cargarLabores = async () => {
-      const { data } = await supabase
-        .from("labores")
-        .select("id, Tipo, Fecha")
-        .order("Fecha", { ascending: false });
-
-      setLabores(data || []);
-    };
-    cargarLabores();
-  }, []);
-
-  // 🔹 Cargar actividades
-  useEffect(() => {
-    const cargarActividades = async () => {
-      const { data } = await supabase
-       .from("actividades")
-       .select("id, nombre")
-       .order("nombre");
-
-      setActividades(data || []);
-      
-    if (data && data.length > 0) {
-         setActividadId(data[0].id);
-      }
-
-    };
-
-    cargarActividades();
-  }, []);
-
-
-  
-
+  // ✅ GUARDAR FACTURA
   const guardarFactura = async () => {
-    if (!fecha || !proveedor || !concepto || !tipo || !monto) {
-      alert("Completá todos los campos obligatorios");
+    if (!fecha || !proveedor || !monto) {
+      alert("Completá los campos obligatorios");
       return;
     }
-     if (!pagador) {
-        alert("Seleccioná quién pagó");
-        return;
-      }
-    
-     if (!actividadId) {
-       alert("Seleccioná una actividad");
-       return;
-      }
 
-const { error } = await supabase.from("facturas").insert([
-  {
-    "Fecha": fecha, // ✅ emisión
-    "Fecha_vencimiento": fechaVencimiento || null,
-    "Proveedor": proveedor,
-    "Concepto": concepto,
-    "Tipo": tipo,
-    "Monto": Number(monto),
-    "Numero_factura": numeroFactura || null,
-    "Pagador": pagador,
-    "Actividad_id": actividadId,
-    "Labor_id": laborId || null,
-  },
-]);
+    const { error } = await supabase.from("facturas").insert([
+      {
+        Fecha: fecha,
+        Fecha_vencimiento: fechaVto || null,
+        Proveedor: proveedor,
+        Numero_factura: numeroFactura,
+        Concepto: concepto,
+        Tipo: tipo,
+        Pagador: pagador,
+        Monto: Number(monto),
+      },
+    ]);
 
     if (error) {
-      console.error("ERROR SUPABASE:", error);
-      alert("Error al guardar la factura: " + error.message);
-     return;
-
-  
+      console.error(error);
+      alert("Error guardando factura");
+      return;
     }
 
     alert("Factura guardada ✅");
 
-    // limpiar formulario
+    // ✅ limpiar form
     setFecha("");
-    setFechaVencimiento("");
+    setFechaVto("");
     setProveedor("");
-    setConcepto("");
     setNumeroFactura("");
+    setConcepto("");
     setTipo("");
-    setMonto("");
-    setLaborId("");
     setPagador("");
+    setMonto("");
   };
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: 10,
+  borderRadius: 8,
+  border: "1px solid #ccc",
+  marginTop: 5,
+  fontSize: 14,
+};
 
+const btnPrimary: React.CSSProperties = {
+  padding: "12px 20px",
+  background: "#0f3d2e",
+  color: "white",
+  border: "none",
+  borderRadius: 8,
+  cursor: "pointer",
+};
+
+const btnSecondary: React.CSSProperties = {
+  padding: "12px 20px",
+  background: "#eee",
+  border: "none",
+  borderRadius: 8,
+  cursor: "pointer",
+};
   return (
-    <div style={{ padding: 40 }}>
-      <h1>Cargar facturas</h1>
-
-      <div>
-        <label>Fecha de emisión</label>
-        <br />
-        <input
-          type="date"
-          value={fecha}
-          onChange={(e) => setFecha(e.target.value)}
-        />
-      </div>
-
-      <br />
-
-
-<div>
-  <label>Fecha de vencimiento</label>
-  <br />
-  <input
-    type="date"
-    value={fechaVencimiento}
-    onChange={(e) => setFechaVencimiento(e.target.value)}
-  />
-</div>
-
-<br/>
-
-      <div>
-        <label>Proveedor</label>
-        <br />
-        <input
-          type="text"
-          value={proveedor}
-          onChange={(e) => setProveedor(e.target.value)}
-        />
-      </div>
-      
-<br />
-
-<div>
-  <label>Número de factura (opcional)</label>
-  <br />
-  <input
-    type="text"
-    value={numeroFactura}
-    onChange={(e) => setNumeroFactura(e.target.value)}
-  />
-</div>
-
-
-      <br />
-      
-
-      <div>
-        <label>Concepto</label>
-        <br />
-        <input
-          type="text"
-          value={concepto}
-          onChange={(e) => setConcepto(e.target.value)}
-        />
-      </div>
-
-      <br />
-
-      <div>
-        <label>Tipo de gasto</label>
-        <br />
-        <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-          <option value="">Seleccionar</option>
-          <option value="insumos">Insumos</option>
-          <option value="servicios">Servicios</option>
-          <option value="combustible">Combustible</option>
-          <option value="impuestos">Impuestos</option>
-        </select>
-      </div>
-
-      <br />
- <div>
-  <label>Quién pagó</label>
-  <br />
-  <select
-    value={pagador}
-    onChange={(e) => setPagador(e.target.value)}
-  >
-    <option value="">Seleccionar</option>
-    <option value="CT">C/T</option>
-    <option value="OC">O/C</option>
-    <option value="Sociedad">Sociedad</option>
-  </select>
-</div>     
-   <br />   
-
-<div>
-  <label>Actividad</label>
-  <br />
-  <select
-    value={actividadId}
-    onChange={(e) => setActividadId(e.target.value)}
-  >
-    <option value="">Seleccionar actividad...</option>
-    
-    {actividades.map((a) => (
-      <option key={a.id} value={a.id}>
-        {a.nombre}
-      </option>
-    ))}
-
-  </select>
-</div>
-<br />
-
-      <div>
-        <label>Monto</label>
-        <br />
-        <input
-          type="number"
-          value={monto}
-          onChange={(e) => setMonto(e.target.value)}
-        />
-      </div>
-
-      <br />
-
-      <div>
-        <label>Labor asociada (opcional)</label>
-        <br />
-        <select
-          value={laborId}
-          onChange={(e) => setLaborId(e.target.value)}
+    <div style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 900 }}>
+        <div
+          style={{
+            background: "white",
+            padding: 30,
+            borderRadius: 12,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+          }}
         >
-          <option value="">Sin asociar</option>
-          {labores.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.Tipo} - {l.Fecha}
-            </option>
-          ))}
-        </select>
+          <h1>Cargar facturas</h1>
+
+          <p style={{ color: "#555", marginBottom: 25 }}>
+            Registro de gastos del sistema.
+          </p>
+
+          {/* ✅ GRID */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 20,
+            }}
+          >
+            <div>
+              <label>Fecha de emisión *</label>
+              <input
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label>Fecha de vencimiento</label>
+              <input
+                type="date"
+                value={fechaVto}
+                onChange={(e) => setFechaVto(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label>Proveedor *</label>
+              <input
+                value={proveedor}
+                onChange={(e) => setProveedor(e.target.value)}
+                placeholder="Ej: Agroinsumos SA"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label>Número factura</label>
+              <input
+                value={numeroFactura}
+                onChange={(e) => setNumeroFactura(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          {/* ✅ CONCEPTO */}
+          <div style={{ marginTop: 20 }}>
+            <label>Concepto</label>
+            <textarea
+              value={concepto}
+              onChange={(e) => setConcepto(e.target.value)}
+              style={{
+                ...inputStyle,
+                height: 80,
+              }}
+            />
+          </div>
+
+          {/* ✅ TIPO + PAGADOR */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 20,
+              marginTop: 20,
+            }}
+          >
+            <div>
+              <label>Tipo de gasto</label>
+              <select
+                value={tipo}
+                onChange={(e) => setTipo(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Seleccionar</option>
+                <option>Insumos</option>
+                <option>Servicios</option>
+                <option>Combustible</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Quién pagó</label>
+              <select
+                value={pagador}
+                onChange={(e) => setPagador(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Seleccionar</option>
+                <option>CT</option>
+                <option>OC</option>
+              </select>
+            </div>
+          </div>
+
+          {/* ✅ MONTO */}
+          <div style={{ marginTop: 20 }}>
+            <label>Monto *</label>
+            <input
+              type="number"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+
+          {/* ✅ BOTONES */}
+          <div style={{ marginTop: 30, display: "flex", gap: 10 }}>
+            <button onClick={guardarFactura} style={btnPrimary}>
+              💾 Guardar factura
+            </button>
+
+            <button style={btnSecondary}>Cancelar</button>
+          </div>
+        </div>
       </div>
-
-      <br />
-
-      <button onClick={guardarFactura}>Guardar factura</button>
     </div>
   );
 }
