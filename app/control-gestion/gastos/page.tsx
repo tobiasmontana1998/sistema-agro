@@ -146,11 +146,13 @@ const [orden, setOrden] = useState("fecha");
     borderRadius: 10,
     boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
   };
-const thStyle = {
+
+const thStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "12px 10px",
   fontSize: 14,
 };
+
 
 const tdStyle = {
   padding: "12px 10px",
