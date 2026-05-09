@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
-export const revalidate = 0;
+
 
 
 import { useEffect, useState } from "react";
@@ -256,13 +256,14 @@ const btnPrimary: React.CSSProperties = {
               <input
   type="date"
   value={fecha}
-  onChange={async (e) => {
-    const nuevaFecha = e.target.value;
-    setFecha(nuevaFecha);
+onChange={(e) => {
+  const nuevaFecha = e.target.value;
+  setFecha(nuevaFecha);
 
-    const valor = await obtenerDolarPorFecha(nuevaFecha);
+  obtenerDolarPorFecha(nuevaFecha).then((valor) => {
     setDolar(valor);
-  }}
+  });
+}}
   style={inputStyle}
 />
 
