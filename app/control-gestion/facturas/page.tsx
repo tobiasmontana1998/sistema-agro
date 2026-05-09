@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
+
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
@@ -127,7 +130,7 @@ useEffect(() => {
       return;
     }
 
-    const montoUSD = Number(monto) / dolar;
+const montoUSD = dolar ? Number(monto) / dolar : 0;
 
     let error;
 
