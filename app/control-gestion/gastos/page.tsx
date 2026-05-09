@@ -15,18 +15,22 @@ const [orden, setOrden] = useState("fecha");
       const { data, error } = await supabase
         .from("facturas")
         .select(`
-          id,
-          Fecha,
-          Fecha_vencimiento,
-          Proveedor,
-          Numero_factura,
-          Concepto,
-          Tipo,
-          Pagador,
-          Monto,
-          actividades ( nombre ),
-          labores ( numero )
-        `)
+         
+ id,
+  Fecha,
+  Fecha_vencimiento,
+  Proveedor,
+  Numero_factura,
+  Concepto,
+  Tipo,
+  Pagador,
+  Monto,
+  monto_usd,
+  dolar,
+  actividades ( nombre ),
+  labores ( numero )
+`)
+
         .order("Fecha", { ascending: false });
 
       if (error) {
@@ -60,42 +64,49 @@ const [orden, setOrden] = useState("fecha");
 
   // 🔹 Exportar CSV
   const exportarCSV = () => {
-    const encabezado = [
-      "Fecha emisión",
-      "Fecha vencimiento",
-      "Proveedor",
-      "Factura",
-      "Concepto",
-      "Tipo",
-      "Pagador",
-      "Actividad",
-      "Monto",
-    ];
+  const encabezado = [
+    "Fecha emisión",
+    "Fecha vencimiento",
+    "Proveedor",
+    "Factura",
+    "Concepto",
+    "Tipo",
+    "Pagador",
+    "Actividad",
+    "Monto ARS",
+    "Monto USD",
+    "Dólar",
+  ];
 
-    const filas = gastos.map((g) => [
-      g.Fecha,
-      g.Fecha_vencimiento,
-      g.Proveedor,
-      g.Numero_factura,
-      g.Concepto,
-      g.Tipo,
-      g.Pagador,
-      g.actividades?.nombre,
-      g.Monto,
-    ]);
+const filas = gastos.map((g) => [
+  g.Fecha,
+  g.Fecha_vencimiento,
+  g.Proveedor,
+  g.Numero_factura,
+  g.Concepto,
+  g.Tipo,
+  g.Pagador,
+  g.actividades?.nombre || "",
+  Number(g.Monto).toFixed(2),
+  Number(g.monto_usd).toFixed(2),
+  Number(g.dolar).toFixed(2),
+]);
 
-    const csv = [encabezado, ...filas]
-      .map((f) => f.join(";"))
-      .join("\n");
+  const csv = [encabezado, ...filas]
+    .map((f) => f.join(";"))
+    .join("\n");
 
-    const blob = new Blob([csv]);
-    const url = URL.createObjectURL(blob);
+  const blob = new Blob(["\uFEFF" + csv], {
+  type: "text/csv;charset=utf-8;"
+});
+  const url = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "gastos.csv";
-    a.click();
-  };
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "gastos_completo.csv";
+  a.click();
+};
+
   const gastosFiltrados = gastos
   .filter((g) =>
     g.Proveedor?.toLowerCase().includes(filtro.toLowerCase()) ||
@@ -266,29 +277,39 @@ const tdStyle = {
 
   {/* HEADER */}
   <thead style={{ background: "#f8f9fa" }}>
-    <tr>
-      <th style={thStyle}>F. Emisión</th>
-      <th style={thStyle}>F. Vto</th>
-      <th style={thStyle}>Proveedor</th>
-      <th style={thStyle}>Factura</th>
-      <th style={thStyle}>Concepto</th>
-      <th style={thStyle}>Tipo</th>
-      <th style={thStyle}>Pagó</th>
-      <th style={thStyle}>Monto</th>
-      <th style={thStyle}>Labor</th>
-      <th style={thStyle}></th>
-    </tr>
-  </thead>
+  <tr>
+    <th style={thStyle}>F. Emisión</th>
+    <th style={thStyle}>F. Vto</th>
+    <th style={thStyle}>Proveedor</th>
+    <th style={thStyle}>Factura</th>
+    <th style={thStyle}>Concepto</th>
+    <th style={thStyle}>Tipo</th>
+    <th style={thStyle}>Pagó</th>
+    <th style={thStyle}>Monto</th>
+    <th style={thStyle}>Monto USD</th>
+    <th style={thStyle}>Dólar</th>
+    <th style={thStyle}>Labor</th>
+    <th style={thStyle}></th>
+
+  </tr>
+</thead>
 
   {/* BODY */}
   <tbody>
   {gastosFiltrados.map((g) => (
     <tr
-      key={g.id}
-      style={{
-        borderBottom: "1px solid #eee",
-      }}
-    >
+  key={g.id}
+ onDoubleClick={() => {
+  console.log("ID DE LA FILA:", g.id);
+  window.location.href = `/control-gestion/facturas?id=${g.id}`;
+}}
+  style={{
+    borderBottom: "1px solid #eee",
+    cursor: "pointer",
+  }}
+>
+
+      
       <td style={tdStyle}>{g.Fecha}</td>
       <td style={tdStyle}>{g.Fecha_vencimiento || "-"}</td>
       <td style={tdStyle}>{g.Proveedor}</td>
@@ -296,21 +317,29 @@ const tdStyle = {
       <td style={tdStyle}>{g.Concepto}</td>
 
       <td style={tdStyle}>
-        <span
-          style={{
-            padding: "4px 10px",
-            borderRadius: 20,
-            background: "#e9ecef",
-            fontSize: 12,
-          }}
-        >
+        <span style={{
+          padding: "4px 10px",
+          borderRadius: 20,
+          background: "#e9ecef",
+          fontSize: 12,
+        }}>
           {g.Tipo}
         </span>
       </td>
 
       <td style={tdStyle}>{g.Pagador}</td>
 
-      <td style={tdStyle}>${g.Monto.toLocaleString()}</td>
+      <td style={tdStyle}>
+        ${g.Monto?.toLocaleString()}
+      </td>
+
+      <td style={tdStyle}>
+        ${g.monto_usd?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+      </td>
+
+      <td style={tdStyle}>
+        {g.dolar || "-"}
+      </td>
 
       <td style={tdStyle}>
         {g.labores ? `#${g.labores.numero}` : "-"}
@@ -321,13 +350,10 @@ const tdStyle = {
           ❌
         </button>
       </td>
+
     </tr>
-  
-
   ))}
-
 </tbody>
-
 </table>
 
 </div>

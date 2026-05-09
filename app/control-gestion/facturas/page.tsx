@@ -2,62 +2,211 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useSearchParams } from "next/navigation";
 
-export default function NuevaLabor() {
 
+export default function CargarFactura() {
+  const searchParams = useSearchParams();
+const id = searchParams.get("id");
+console.log("ID:", id);
+
+  // 🔹 estados
+  const [fecha, setFecha] = useState("");
+  const [fechaVto, setFechaVto] = useState("");
+  const [proveedor, setProveedor] = useState("");
+  const [numeroFactura, setNumeroFactura] = useState("");
+  const [concepto, setConcepto] = useState("");
   const [tipo, setTipo] = useState("");
-  const [cultivo, setCultivo] = useState("");
-  const [lote, setLote] = useState("");
-  const [costo, setCosto] = useState("");
-  const [observaciones, setObservaciones] = useState("");
+  const [pagador, setPagador] = useState("");
+  const [monto, setMonto] = useState("");
 
-  const [lotes, setLotes] = useState<any[]>([]);
+  const [actividad, setActividad] = useState("");
+  const [actividades, setActividades] = useState<any[]>([]);
 
-  // ✅ cargar lotes
+  const [labor, setLabor] = useState("");
+  const [labores, setLabores] = useState<any[]>([]);
+
+  const [dolar, setDolar] = useState<number | null>(null);
+
+  // 🔹 cargar actividades
   useEffect(() => {
     const fetch = async () => {
-      const { data } = await supabase.from("lotes").select();
-      setLotes(data || []);
+      const { data } = await supabase.from("actividades").select();
+      setActividades(data || []);
     };
     fetch();
   }, []);
 
-  // ✅ guardar labor
-  const guardarLabor = async () => {
-    if (!tipo || !lote) {
-      alert("Faltan campos obligatorios");
-      return;
-    }
+  // 🔹 cargar labores
+  useEffect(() => {
+    const fetch = async () => {
+      const { data } = await supabase.from("labores").select();
+      setLabores(data || []);
+    };
+    fetch();
+  }, []);
 
-    const { error } = await supabase.from("labores").insert([
-      {
-        Tipo: tipo,
-        Cultivo: cultivo,
-        Lote_id: lote,
-        Costo_total: Number(costo) || 0,
-        Observaciones: observaciones,
-      },
-    ]);
+  // ✅ DÓLAR HISTÓRICO POR FECHA
+  const obtenerDolarPorFecha = async (fecha: string) => {
+    try {
+      const res = await fetch("https://api.bluelytics.com.ar/v2/evolution.json");
+      const data = await res.json();
+
+      const fechaISO = new Date(fecha).toISOString().slice(0, 10);
+
+      let encontrado = data.find((d: any) =>
+        d.date.startsWith(fechaISO)
+      );
+
+      if (!encontrado) {
+        encontrado = data[data.length - 1];
+      }
+
+      const compra = encontrado.value_buy;
+      const venta = encontrado.value_sell;
+
+      return (compra + venta) / 2;
+
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
+  };
+
+  // ✅ ACTUALIZA DÓLAR AL CAMBIAR FECHA
+  useEffect(() => {
+    if (!fecha) return;
+
+    const fetch = async () => {
+      const valor = await obtenerDolarPorFecha(fecha);
+      setDolar(valor);
+    };
+
+    fetch();
+  }, [fecha]);
+useEffect(() => {
+  if (!id) return;
+
+  const fetchFactura = async () => {
+    const { data, error } = await supabase
+      .from("facturas")
+      .select("*")
+      .eq("id", id)
+      .single();
 
     if (error) {
       console.error(error);
-      alert("Error al guardar");
       return;
     }
 
-    alert("Labor guardada ✅");
+    if (data) {
+      setFecha(data.Fecha || "");
+      setFechaVto(data.Fecha_vencimiento || "");
+      setProveedor(data.Proveedor || "");
+      setNumeroFactura(data.Numero_factura || "");
+      setConcepto(data.Concepto || "");
+      setTipo(data.Tipo || "");
+      setPagador(data.Pagador || "");
+      setMonto(data.Monto || "");
 
-    setTipo("");
-    setCultivo("");
-    setLote("");
-    setCosto("");
-    setObservaciones("");
+      setActividad(data.Actividad_id || "");
+      setLabor(data.Labor_id || "");
+
+      setDolar(data.dolar || null);
+    }
   };
-const cardStyle: React.CSSProperties = {
+
+  fetchFactura();
+}, [id]);
+
+  // ✅ GUARDAR
+  const guardarFactura = async () => {
+
+    if (!fecha || !proveedor || !monto || !dolar) {
+      alert("Completá los campos obligatorios");
+      return;
+    }
+
+    const montoUSD = Number(monto) / dolar;
+
+    let error;
+
+if (id) {
+  // ✅ EDITAR FACTURA EXISTENTE
+  const { error: updateError } = await supabase
+    .from("facturas")
+    .update({
+      Fecha: fecha,
+      Fecha_vencimiento: fechaVto || null,
+      Proveedor: proveedor,
+      Numero_factura: numeroFactura,
+      Concepto: concepto,
+      Tipo: tipo,
+      Pagador: pagador,
+      Monto: Number(monto),
+      monto_usd: Number(monto) / dolar,
+      dolar: dolar,
+      Actividad_id: actividad,
+      Labor_id: labor || null,
+    })
+    .eq("id", id);
+
+  error = updateError;
+
+} else {
+  // ✅ CREAR FACTURA NUEVA
+  const { error: insertError } = await supabase
+    .from("facturas")
+    .insert([
+      {
+        Fecha: fecha,
+        Fecha_vencimiento: fechaVto || null,
+        Proveedor: proveedor,
+        Numero_factura: numeroFactura,
+        Concepto: concepto,
+        Tipo: tipo,
+        Pagador: pagador,
+        Monto: Number(monto),
+        monto_usd: Number(monto) / dolar,
+        dolar: dolar,
+        Actividad_id: actividad,
+        Labor_id: labor || null,
+      }
+    ]);
+
+  error = insertError;
+}
+
+    
+if (error) {
+  console.error("ERROR REAL:", error);
+  alert(error.message);  // 👈 ESTO ES LO IMPORTANTE
+  return;
+}
+
+
+    alert(`✅ ARS ${monto} | USD ${montoUSD.toFixed(2)}`);
+
+    // limpiar
+    setFecha("");
+    setFechaVto("");
+    setProveedor("");
+    setNumeroFactura("");
+    setConcepto("");
+    setTipo("");
+    setPagador("");
+    setMonto("");
+    setActividad("");
+    setLabor("");
+    setDolar(null);
+  };
+  const cardStyle: React.CSSProperties = {
   background: "white",
   padding: 30,
   borderRadius: 12,
   boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 20,
 };
 
 const grid2: React.CSSProperties = {
@@ -65,6 +214,7 @@ const grid2: React.CSSProperties = {
   gridTemplateColumns: "1fr 1fr",
   gap: 20,
 };
+
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -80,103 +230,143 @@ const btnPrimary: React.CSSProperties = {
   color: "white",
   border: "none",
   borderRadius: 8,
-  cursor: "pointer",
 };
 
-const btnSecondary: React.CSSProperties = {
-  padding: "12px 20px",
-  background: "#eee",
-  border: "none",
-  borderRadius: 8,
-};
+
 
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
-
       <div style={{ width: "100%", maxWidth: 900 }}>
 
         <div style={cardStyle}>
-
-          <h1>Cargar Labor</h1>
-
-          <p style={{ color: "#555", marginBottom: 25 }}>
-            Registro de trabajos realizados en campo.
-          </p>
+<h1>
+  {id ? "✏️ Editar factura" : "➕ Cargar facturas"}
+</h1>
 
           {/* ✅ GRID */}
           <div style={grid2}>
 
             <div>
-              <label>Tipo de labor *</label>
-              <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={inputStyle}>
-                <option value="">Seleccionar</option>
-                <option>Siembra</option>
-                <option>Fertilización</option>
-                <option>Cosecha</option>
-                <option>Pulverización</option>
-              </select>
+              <label>Fecha *</label>
+              <input
+  type="date"
+  value={fecha}
+  onChange={async (e) => {
+    const nuevaFecha = e.target.value;
+    setFecha(nuevaFecha);
+
+    const valor = await obtenerDolarPorFecha(nuevaFecha);
+    setDolar(valor);
+  }}
+  style={inputStyle}
+/>
+
             </div>
 
             <div>
-              <label>Cultivo</label>
-              <select value={cultivo} onChange={(e) => setCultivo(e.target.value)} style={inputStyle}>
-                <option value="">Seleccionar</option>
-                <option>Soja</option>
-                <option>Maíz</option>
-                <option>Trigo</option>
-              </select>
+              <label>Vencimiento</label>
+              <input type="date" value={fechaVto} onChange={(e) => setFechaVto(e.target.value)} style={inputStyle} />
             </div>
 
             <div>
-              <label>Lote *</label>
-              <select value={lote} onChange={(e) => setLote(e.target.value)} style={inputStyle}>
+              <label>Proveedor *</label>
+              <input value={proveedor} onChange={(e) => setProveedor(e.target.value)} style={inputStyle} />
+            </div>
+
+            <div>
+              <label>Factura</label>
+              <input value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} style={inputStyle} />
+            </div>
+
+          </div>
+
+          {/* CONCEPTO */}
+          <div style={{ marginTop: 20 }}>
+            <label>Concepto</label>
+            <textarea value={concepto} onChange={(e) => setConcepto(e.target.value)} style={{ ...inputStyle, height: 80 }} />
+          </div>
+
+          {/* ACTIVIDAD + LABOR */}
+          <div style={{ ...grid2, marginTop: 20 }}>
+
+            <div>
+              <label>Actividad</label>
+              <select value={actividad} onChange={(e) => setActividad(e.target.value)} style={inputStyle}>
                 <option value="">Seleccionar</option>
-                {lotes.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.nombre}
-                  </option>
+                {actividades.map((a) => (
+                  <option key={a.id} value={a.id}>{a.nombre}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label>Costo total</label>
-              <input
-                type="number"
-                value={costo}
-                onChange={(e) => setCosto(e.target.value)}
-                style={inputStyle}
-                placeholder="$"
-              />
+              <label>Labor</label>
+              <select value={labor} onChange={(e) => setLabor(e.target.value)} style={inputStyle}>
+                <option value="">Sin asociar</option>
+                {labores.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    #{l.numero} - {l.Tipo}
+                  </option>
+                ))}
+              </select>
             </div>
 
           </div>
 
-          {/* ✅ OBSERVACIONES */}
+          {/* TIPO + PAGADOR */}
+          <div style={{ ...grid2, marginTop: 20 }}>
+
+            <div>
+              <label>Tipo</label>
+              <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                <option>Insumos</option>
+                <option>Servicios</option>
+                <option>Combustible</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Pagador</label>
+              <select value={pagador} onChange={(e) => setPagador(e.target.value)} style={inputStyle}>
+                <option value="">Seleccionar</option>
+                <option value="CT">CT</option>
+                <option value="OC">OC</option>
+                <option value="Sociedad">Sociedad</option>
+              </select>
+            </div>
+
+          </div>
+
+          {/* MONTO */}
           <div style={{ marginTop: 20 }}>
-            <label>Observaciones</label>
-            <textarea
-              value={observaciones}
-              onChange={(e) => setObservaciones(e.target.value)}
-              style={{
-                ...inputStyle,
-                height: 100,
-              }}
-              placeholder="Detalles de la labor..."
+            <label>Monto *</label>
+            <input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} style={inputStyle} />
+          </div>
+
+          {/* ✅ DOLAR EDITABLE */}
+          <div style={{ marginTop: 15 }}>
+            <label>Dólar aplicado</label>
+            <input
+              type="number"
+              value={dolar || ""}
+              onChange={(e) => setDolar(Number(e.target.value))}
+              style={inputStyle}
             />
           </div>
 
-          {/* ✅ BOTONES */}
-          <div style={{ marginTop: 30, display: "flex", gap: 10 }}>
+          {/* ✅ USD EN VIVO */}
+          {monto && dolar && (
+            <p style={{ marginTop: 10 }}>
+              ≈ USD {(Number(monto) / dolar).toFixed(2)}
+            </p>
+          )}
 
-            <button onClick={guardarLabor} style={btnPrimary}>
-              💾 Guardar labor
+          {/* BOTÓN */}
+          <div style={{ marginTop: 30 }}>
+            <button onClick={guardarFactura} style={btnPrimary}>
+              💾 Guardar factura
             </button>
-
-            <button style={btnSecondary}>
-              Cancelar
-            </button>
-
           </div>
 
         </div>
