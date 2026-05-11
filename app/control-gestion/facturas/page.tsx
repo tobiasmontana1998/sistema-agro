@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-export const fetchCache = "force-no-store";
 
 
 
@@ -13,7 +11,11 @@ import { useSearchParams } from "next/navigation";
 export default function CargarFactura() {
   const searchParams = useSearchParams();
 const id = searchParams.get("id");
-console.log("ID:", id);
+
+useEffect(() => {
+  console.log("ID:", id);
+}, [id]);
+
 
   // 🔹 estados
   const [fecha, setFecha] = useState("");
