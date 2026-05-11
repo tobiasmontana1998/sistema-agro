@@ -212,18 +212,17 @@ const tdStyle = {
   <div style={cardStyle}>
     <p>Pagos (CT vs OC)</p>
 
-    <div style={{ width: "100%", height: 150 }}>
-      <ResponsiveContainer>
-        <PieChart>
-          <Pie data={dataPie} dataKey="value" outerRadius={60}>
-            {dataPie.map((entry, index) => (
-              <Cell key={index} fill={COLORS[index]} />
-            ))}
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
-
+   <div style={{ width: "100%", height: 150 }}>
+  <ResponsiveContainer width="100%" height={150}>
+    <PieChart>
+      <Pie data={dataPie} dataKey="value" outerRadius={60}>
+        {dataPie.map((entry, index) => (
+          <Cell key={index} fill={COLORS[index]} />
+        ))}
+      </Pie>
+    </PieChart>
+  </ResponsiveContainer>
+</div>
     <div style={{ marginTop: 10 }}>
       <p>CT: {porcentajeCT}%</p>
       <p>OC: {porcentajeOC}%</p>
