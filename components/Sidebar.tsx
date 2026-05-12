@@ -46,12 +46,19 @@ export default function Sidebar() {
             💰 Gastos
           </Link>
 
+
           <Link
             href="/control-gestion/facturas"
             style={{ color: "white", textDecoration: "none" }}
           >
             ➕ Cargar gasto
           </Link>
+          <Link
+  href="/control-gestion/proveedores"
+  style={{ color: "white", textDecoration: "none" }}
+>
+  🏢 Proveedores
+</Link>
         </div>
       </div>
 

@@ -16,6 +16,9 @@ export default function CargarFactura() {
   const [fecha, setFecha] = useState("");
   const [fechaVto, setFechaVto] = useState("");
   const [proveedor, setProveedor] = useState("");
+  const [proveedores, setProveedores] = useState<any[]>([]);
+  const [proveedorId, setProveedorId] = useState("");
+
   const [numeroFactura, setNumeroFactura] = useState("");
   const [concepto, setConcepto] = useState("");
   const [tipo, setTipo] = useState("");
@@ -38,7 +41,24 @@ export default function CargarFactura() {
     };
     fetchData();
   }, []);
+useEffect(() => {
+  const fetchProveedores = async () => {
+    const { data, error } = await supabase
+      .from("proveedores")
+      .select("id, razon_social")
+      .eq("activo", true)
+      .order("razon_social");
 
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setProveedores(data || []);
+  };
+
+  fetchProveedores();
+}, []);
   // 🔹 cargar labores
   useEffect(() => {
     const fetchData = async () => {
@@ -102,7 +122,7 @@ export default function CargarFactura() {
       if (data) {
         setFecha(data.Fecha || "");
         setFechaVto(data.Fecha_vencimiento || "");
-        setProveedor(data.Proveedor || "");
+        setProveedorId(data.proveedor_id);
         setNumeroFactura(data.Numero_factura || "");
         setConcepto(data.Concepto || "");
         setTipo(data.Tipo || "");
@@ -121,10 +141,14 @@ export default function CargarFactura() {
 
   // ✅ guardar
   const guardarFactura = async () => {
-    if (!fecha || !proveedor || !monto || !dolar) {
+    if (!fecha || !monto || !dolar) {
       alert("Completá los campos obligatorios");
       return;
     }
+    if (!proveedorId) {
+  alert("Seleccioná un proveedor");
+  return;
+}
 
     const montoUSD = Number(monto) / dolar;
 
@@ -136,7 +160,6 @@ export default function CargarFactura() {
         .update({
           Fecha: fecha,
           Fecha_vencimiento: fechaVto || null,
-          Proveedor: proveedor,
           Numero_factura: numeroFactura,
           Concepto: concepto,
           Tipo: tipo,
@@ -157,6 +180,7 @@ export default function CargarFactura() {
           {
             Fecha: fecha,
             Fecha_vencimiento: fechaVto || null,
+            proveedor_id: proveedorId,
             Proveedor: proveedor,
             Numero_factura: numeroFactura,
             Concepto: concepto,
@@ -258,13 +282,21 @@ export default function CargarFactura() {
             </div>
 
             <div>
-              <label>Proveedor *</label>
-              <input
-                value={proveedor}
-                onChange={(e) => setProveedor(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
+  <label>Proveedor *</label>
+  <select
+    value={proveedorId}
+    onChange={(e) => setProveedorId(e.target.value)}
+    style={{ width: "100%", padding: 10, borderRadius: 8 }}
+  >
+    <option value="">Seleccionar proveedor</option>
+
+    {proveedores.map((p) => (
+      <option key={p.id} value={p.id}>
+        {p.razon_social}
+      </option>
+    ))}
+  </select>
+</div>
 
             <div>
               <label>Factura</label>

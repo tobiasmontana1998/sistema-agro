@@ -15,11 +15,9 @@ const [orden, setOrden] = useState("fecha");
       const { data, error } = await supabase
         .from("facturas")
         .select(`
-         
- id,
+  id,
   Fecha,
   Fecha_vencimiento,
-  Proveedor,
   Numero_factura,
   Concepto,
   Tipo,
@@ -27,9 +25,13 @@ const [orden, setOrden] = useState("fecha");
   Monto,
   monto_usd,
   dolar,
+  pagada,
+  proveedor_id,
+  proveedores:proveedor_id (
+    razon_social
+  ),
   actividades ( nombre ),
-  labores ( numero ),
-  pagada
+  labores ( numero )
 `)
 
         .order("Fecha", { ascending: false });
@@ -82,7 +84,7 @@ const [orden, setOrden] = useState("fecha");
 const filas = gastos.map((g) => [
   g.Fecha,
   g.Fecha_vencimiento,
-  g.Proveedor,
+  g.proveedores?.razon_social,
   g.Numero_factura,
   g.Concepto,
   g.Tipo,
@@ -110,7 +112,9 @@ const filas = gastos.map((g) => [
 
   const gastosFiltrados = gastos
   .filter((g) =>
-    g.Proveedor?.toLowerCase().includes(filtro.toLowerCase()) ||
+    g.proveedores?.razon_social
+      ?.toLowerCase()
+      .includes(filtro.toLowerCase()) ||
     g.Concepto?.toLowerCase().includes(filtro.toLowerCase())
   )
   .sort((a, b) => {
@@ -122,6 +126,7 @@ const filas = gastos.map((g) => [
     }
     return 0;
   });
+
 
   // 🔹 KPIs
   const totalGastado = gastos.reduce((acc, g) => acc + (g.Monto || 0), 0);
@@ -170,6 +175,13 @@ const tdStyle = {
   padding: "12px 10px",
   fontSize: 14,
 };
+const facturasPendientes = gastos
+  .filter((g) => g.pagada === false && g.Fecha_vencimiento)
+  .sort(
+    (a, b) =>
+      new Date(a.Fecha_vencimiento).getTime() -
+      new Date(b.Fecha_vencimiento).getTime()
+  );
 // fix deploy
 
   return (
@@ -204,12 +216,59 @@ const tdStyle = {
     <p>Total Gastado</p>
     <h2>${totalGastado.toLocaleString()}</h2>
   </div>
+<div style={cardStyle}>
+  <p>Facturas pendientes</p>
 
-  <div style={cardStyle}>
-    <p>Facturas</p>
-    <h2>{cantidadFacturas}</h2>
-  </div>
+  {facturasPendientes.length === 0 ? (
+    <p style={{ marginTop: 10, color: "green" }}>
+      ✅ No hay facturas pendientes
+    </p>
+  ) : (
+    <div style={{ marginTop: 10, fontSize: 13 }}>
+      
+      {/* HEADER */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "80px 1fr 80px 90px",
+          fontWeight: "bold",
+          borderBottom: "1px solid #ddd",
+          paddingBottom: 6,
+          marginBottom: 6,
+        }}
+      >
+        <div>Vto</div>
+        <div>Proveedor</div>
+        <div>Fact.</div>
+        <div>Monto</div>
+      </div>
 
+      {/* FILAS */}
+      {facturasPendientes.slice(0, 5).map((f) => (
+        <div
+          key={f.id}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "80px 1fr 80px 90px",
+            padding: "4px 0",
+            borderBottom: "1px solid #f0f0f0",
+            color:
+              new Date(f.Fecha_vencimiento) < new Date()
+                ? "red"
+                : "#000",
+          }}
+        >
+          <div>{f.Fecha_vencimiento}</div>
+          <div>{f.proveedores?.razon_social || "—"}</div>
+          <div>{f.Numero_factura}</div>
+          <div>${Number(f.Monto).toLocaleString()}</div>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+
+ 
   <div style={cardStyle}>
     <p>Pagos (CT vs OC)</p>
 
@@ -278,18 +337,18 @@ const tdStyle = {
   {/* HEADER */}
   <thead style={{ background: "#f8f9fa" }}>
   <tr>
-    <th style={thStyle}>F. Emisión</th>
-    <th style={thStyle}>F. Vto</th>
-    <th style={thStyle}>Proveedor</th>
-    <th style={thStyle}>Factura</th>
-    <th style={thStyle}>Concepto</th>
-    <th style={thStyle}>Tipo</th>
-    <th style={thStyle}>Pagó</th>
-    <th style={thStyle}>Monto</th>
-    <th style={thStyle}>Monto USD</th>
-    <th style={thStyle}>Dólar</th>
-    <th style={thStyle}>Labor</th>
-    <th style={thStyle}></th>
+  <th>F. Emisión</th>
+<th>F. Vto</th>
+<th>Proveedor</th>
+<th>Factura</th>
+<th>Concepto</th>
+<th>Tipo</th>
+<th>Pagador</th>
+<th>Pagó</th>
+<th>Monto</th>
+<th>Monto USD</th>
+<th>Dólar</th>
+<th>Labor</th>
 
   </tr>
 </thead>
@@ -314,7 +373,7 @@ const tdStyle = {
       
       <td style={tdStyle}>{g.Fecha}</td>
       <td style={tdStyle}>{g.Fecha_vencimiento || "-"}</td>
-      <td style={tdStyle}>{g.Proveedor}</td>
+      <td style={tdStyle}>{g.proveedores?.razon_social}</td>
       <td style={tdStyle}>{g.Numero_factura}</td>
       <td style={tdStyle}>{g.Concepto}</td>
 
@@ -337,26 +396,34 @@ const tdStyle = {
       type="checkbox"
       checked={g.pagada || false}
       onChange={async (e) => {
-        const nuevoEstado = e.target.checked;
+  const nuevoEstado = e.target.checked;
 
-        const { error } = await supabase
-          .from("facturas")
-          .update({ pagada: nuevoEstado })
-          .eq("id", g.id);
+  // ✅ Si estaba pagada y la quieren desmarcar
+  if (g.pagada && !nuevoEstado) {
+    const confirmar = confirm("¿Seguro que querés marcar esta factura como NO pagada?");
+    if (!confirmar) {
+      return; // ⛔ cancelamos el cambio
+    }
+  }
 
-        if (error) {
-          alert("Error al actualizar");
-          return;
-        }
+  const { error } = await supabase
+    .from("facturas")
+    .update({ pagada: nuevoEstado })
+    .eq("id", g.id);
 
-        setGastos((prev) =>
-          prev.map((factura) =>
-            factura.id === g.id
-              ? { ...factura, pagada: nuevoEstado }
-              : factura
-          )
-        );
-      }}
+  if (error) {
+    alert("Error al actualizar");
+    return;
+  }
+
+  setGastos((prev) =>
+    prev.map((factura) =>
+      factura.id === g.id
+        ? { ...factura, pagada: nuevoEstado }
+        : factura
+    )
+  );
+}}
       style={{ display: "none" }}
     />
 
@@ -386,9 +453,8 @@ const tdStyle = {
       </td>
 
       <td style={tdStyle}>
-        ${g.monto_usd?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-      </td>
-
+  USD {Number(g.monto_usd).toFixed(2)}
+</td>
       <td style={tdStyle}>
         {g.dolar || "-"}
       </td>
