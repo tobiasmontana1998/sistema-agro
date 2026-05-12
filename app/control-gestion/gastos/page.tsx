@@ -28,7 +28,8 @@ const [orden, setOrden] = useState("fecha");
   monto_usd,
   dolar,
   actividades ( nombre ),
-  labores ( numero )
+  labores ( numero ),
+  pagada
 `)
 
         .order("Fecha", { ascending: false });
@@ -303,9 +304,11 @@ const tdStyle = {
   window.location.href = `/control-gestion/facturas?id=${g.id}`;
 }}
   style={{
-    borderBottom: "1px solid #eee",
-    cursor: "pointer",
-  }}
+  borderBottom: "1px solid #eee",
+  cursor: "pointer",
+  backgroundColor: g.pagada ? "#d4edda" : "white", // ✅ verde claro
+}}
+  
 >
 
       
@@ -326,7 +329,57 @@ const tdStyle = {
         </span>
       </td>
 
-      <td style={tdStyle}>{g.Pagador}</td>
+    <td style={tdStyle}>{g.Pagador}</td>
+
+<td style={tdStyle}>
+  <label style={{ cursor: "pointer" }}>
+    <input
+      type="checkbox"
+      checked={g.pagada || false}
+      onChange={async (e) => {
+        const nuevoEstado = e.target.checked;
+
+        const { error } = await supabase
+          .from("facturas")
+          .update({ pagada: nuevoEstado })
+          .eq("id", g.id);
+
+        if (error) {
+          alert("Error al actualizar");
+          return;
+        }
+
+        setGastos((prev) =>
+          prev.map((factura) =>
+            factura.id === g.id
+              ? { ...factura, pagada: nuevoEstado }
+              : factura
+          )
+        );
+      }}
+      style={{ display: "none" }}
+    />
+
+    <div
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        border: "2px solid #ccc",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: g.pagada ? "#28a745" : "white",
+      }}
+    >
+      {g.pagada && (
+        <span style={{ color: "white", fontWeight: "bold" }}>
+          ✓
+        </span>
+      )}
+    </div>
+  </label>
+</td>
 
       <td style={tdStyle}>
         ${g.Monto?.toLocaleString()}
