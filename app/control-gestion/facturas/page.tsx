@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -9,9 +10,7 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export const dynamic = "force-dynamic";
-
-export default function Page() {
+function CargarFacturaInner() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
 
@@ -196,21 +195,21 @@ export default function Page() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>PDF adjunto</div>
                     <div style={{ fontSize: 12, color: "#888" }}>Ya tiene un PDF cargado</div>
                   </div>
-<div style={{ display: "flex", gap: 8 }}>
-  <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#0f1f17", fontWeight: 600, textDecoration: "none" }}>Ver PDF →</a>
-  <button
-    onClick={async () => {
-      if (!confirm("¿Eliminar el PDF adjunto?")) return;
-      const nombreArchivo = pdfUrl!.split("/").pop()!;
-      await supabase.storage.from("facturas").remove([nombreArchivo]);
-      await supabase.from("facturas").update({ pdf_url: null }).eq("id", id!);
-      setPdfUrl(null);
-    }}
-    style={{ background: "none", border: "none", color: "red", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
-  >
-    🗑 Eliminar
-  </button>
-</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#0f1f17", fontWeight: 600, textDecoration: "none" }}>Ver PDF →</a>
+                    <button
+                      onClick={async () => {
+                        if (!confirm("¿Eliminar el PDF adjunto?")) return;
+                        const nombreArchivo = pdfUrl!.split("/").pop()!;
+                        await supabase.storage.from("facturas").remove([nombreArchivo]);
+                        await supabase.from("facturas").update({ pdf_url: null }).eq("id", id!);
+                        setPdfUrl(null);
+                      }}
+                      style={{ background: "none", border: "none", color: "red", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                    >
+                      🗑 Eliminar
+                    </button>
+                  </div>
                 </div>
               )}
               {pdfFile && (
@@ -255,5 +254,13 @@ export default function Page() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div style={{ padding: 40 }}>Cargando...</div>}>
+      <CargarFacturaInner />
+    </Suspense>
   );
 }
