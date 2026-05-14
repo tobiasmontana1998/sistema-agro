@@ -13,6 +13,7 @@ export default function RemitosPage() {
   const [proveedores, setProveedores] = useState<any[]>([]);
   const [proveedorId, setProveedorId] = useState("");
   const [fecha, setFecha] = useState("");
+  const [nroRemito, setNroRemito] = useState("");
   const [observaciones, setObservaciones] = useState("");
   const [lineas, setLineas] = useState<{ insumo_id: string; cantidad: string }[]>([
     { insumo_id: "", cantidad: "" }
@@ -53,7 +54,7 @@ export default function RemitosPage() {
       return;
     }
 
-    const numeroRemito = `REM-${Date.now()}`;
+    const numeroRemito = nroRemito || `REM-${Date.now()}`;
 
     for (const linea of lineas) {
       const { error } = await supabase.from("stock_movimientos").insert([{
@@ -70,6 +71,7 @@ export default function RemitosPage() {
     }
 
     setFecha("");
+    setNroRemito("");
     setProveedorId("");
     setObservaciones("");
     setLineas([{ insumo_id: "", cantidad: "" }]);
@@ -112,14 +114,23 @@ export default function RemitosPage() {
         <h1>📥 Cargar Remito</h1>
         <p style={{ color: "#555", marginBottom: 25 }}>Registrá la entrada de insumos al stock.</p>
 
-        {/* FECHA Y PROVEEDOR */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+        {/* FECHA, NRO REMITO Y PROVEEDOR */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 20 }}>
           <div>
             <label>Fecha del remito *</label>
             <input
               type="date"
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label>N° Remito</label>
+            <input
+              value={nroRemito}
+              onChange={(e) => setNroRemito(e.target.value)}
+              placeholder="Ej: 0001-00012345"
               style={inputStyle}
             />
           </div>

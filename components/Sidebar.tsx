@@ -65,6 +65,9 @@ export default function Sidebar() {
 <Link href="/agricultura/remitos" style={{ color: "white", textDecoration: "none" }}>
   📥 Remitos
 </Link>
+<Link href="/agricultura/historial-remitos" style={{ color: "white", textDecoration: "none" }}>
+  📋 Historial remitos
+</Link>
         </div>
       </div>
 

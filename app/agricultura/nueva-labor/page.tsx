@@ -48,7 +48,7 @@ export default function NuevaLabor() {
       return;
     }
     // Validar que los insumos tengan remito anterior a la fecha de la labor
-const fechaLabor = new Date().toISOString().split("T")[0];
+
 for (const item of insumosUsados) {
   if (!item.insumo_id || !item.cantidad) continue;
 
@@ -57,8 +57,7 @@ for (const item of insumosUsados) {
     .select("cantidad, fecha")
     .eq("insumo_id", item.insumo_id)
     .eq("tipo", "entrada")
-    .lte("fecha", fechaLabor);
-
+    .lte("fecha", fecha);
   const totalEntradas = (entradas || []).reduce((acc, m) => acc + Number(m.cantidad), 0);
 
   const { data: salidas } = await supabase
@@ -66,7 +65,7 @@ for (const item of insumosUsados) {
     .select("cantidad")
     .eq("insumo_id", item.insumo_id)
     .eq("tipo", "salida")
-    .lte("fecha", fechaLabor);
+    .lte("fecha", fecha);
 
   const totalSalidas = (salidas || []).reduce((acc, m) => acc + Number(m.cantidad), 0);
 
@@ -85,7 +84,7 @@ for (const item of insumosUsados) {
     Tipo: tipo,
     Lote_id: lote,
     Costo_total: Number(costo) || 0,
-    Fecha: new Date().toISOString().split("T")[0],
+    Fecha: fecha,
     Cultivo_id: null,
   }])
   .select()
