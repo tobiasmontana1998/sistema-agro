@@ -59,6 +59,12 @@ export default function Sidebar() {
           <Link href="/agricultura/labores-por-lote" style={{ color: "white", textDecoration: "none" }}>
             📊 Labores por lote
           </Link>
+          <Link href="/agricultura/stock" style={{ color: "white", textDecoration: "none" }}>
+  📦 Stock
+</Link>
+<Link href="/agricultura/remitos" style={{ color: "white", textDecoration: "none" }}>
+  📥 Remitos
+</Link>
         </div>
       </div>
 
