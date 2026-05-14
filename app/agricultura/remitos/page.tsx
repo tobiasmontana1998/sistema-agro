@@ -11,7 +11,9 @@ const supabase = createBrowserClient(
 export default function RemitosPage() {
   const [insumos, setInsumos] = useState<any[]>([]);
   const [proveedores, setProveedores] = useState<any[]>([]);
+  const [facturas, setFacturas] = useState<any[]>([]);
   const [proveedorId, setProveedorId] = useState("");
+  const [facturaId, setFacturaId] = useState("");
   const [fecha, setFecha] = useState("");
   const [nroRemito, setNroRemito] = useState("");
   const [observaciones, setObservaciones] = useState("");
@@ -21,25 +23,60 @@ export default function RemitosPage() {
 
   useEffect(() => { cargarDatos(); }, []);
 
+  // Cuando se selecciona una factura, autocompletar proveedor
+  useEffect(() => {
+    if (!facturaId) return;
+    const factura = facturas.find(f => f.id === facturaId);
+    if (factura?.proveedor_id) setProveedorId(factura.proveedor_id);
+  }, [facturaId]);
+
   const cargarDatos = async () => {
-    const [{ data: ins }, { data: prov }] = await Promise.all([supabase.from("insumos").select(), supabase.from("proveedores").select()]);
+    const [{ data: ins }, { data: prov }, { data: facts }] = await Promise.all([
+      supabase.from("insumos").select(),
+      supabase.from("proveedores").select(),
+      supabase.from("facturas")
+        .select("id, Numero_factura, Concepto, Fecha, proveedor_id, proveedores(razon_social), tipo_comprobante")
+        .eq("Tipo", "Insumos")
+        .order("Fecha", { ascending: false }),
+    ]);
     setInsumos(ins || []);
     setProveedores(prov || []);
+    setFacturas(facts || []);
   };
 
   const agregarLinea = () => setLineas([...lineas, { insumo_id: "", cantidad: "" }]);
-  const actualizarLinea = (index: number, campo: string, valor: string) => { const u = [...lineas]; u[index] = { ...u[index], [campo]: valor }; setLineas(u); };
-  const quitarLinea = (index: number) => { if (lineas.length === 1) return; setLineas(lineas.filter((_, i) => i !== index)); };
+  const actualizarLinea = (index: number, campo: string, valor: string) => {
+    const u = [...lineas];
+    u[index] = { ...u[index], [campo]: valor };
+    setLineas(u);
+  };
+  const quitarLinea = (index: number) => {
+    if (lineas.length === 1) return;
+    setLineas(lineas.filter((_, i) => i !== index));
+  };
 
   const guardarRemito = async () => {
     if (!fecha) { alert("Ingresá la fecha del remito"); return; }
     if (lineas.some(l => !l.insumo_id || !l.cantidad)) { alert("Completá todos los insumos"); return; }
     const numeroRemito = nroRemito || `REM-${Date.now()}`;
+
     for (const linea of lineas) {
-      const { error } = await supabase.from("stock_movimientos").insert([{ insumo_id: linea.insumo_id, tipo: "entrada", cantidad: Number(linea.cantidad), motivo: "remito", fecha, proveedor_id: proveedorId || null, numero_remito: numeroRemito, observaciones }]);
+      const { error } = await supabase.from("stock_movimientos").insert([{
+        insumo_id: linea.insumo_id,
+        tipo: "entrada",
+        cantidad: Number(linea.cantidad),
+        motivo: "remito",
+        fecha,
+        proveedor_id: proveedorId || null,
+        numero_remito: numeroRemito,
+        observaciones,
+        factura_id: facturaId || null,
+      }]);
       if (error) { alert("Error: " + error.message); return; }
     }
-    setFecha(""); setNroRemito(""); setProveedorId(""); setObservaciones(""); setLineas([{ insumo_id: "", cantidad: "" }]);
+
+    setFecha(""); setNroRemito(""); setProveedorId(""); setFacturaId("");
+    setObservaciones(""); setLineas([{ insumo_id: "", cantidad: "" }]);
     alert("Remito guardado ✅");
   };
 
@@ -50,6 +87,8 @@ export default function RemitosPage() {
     setNuevoInsumo({ nombre: "", categoria: "", unidad: "" }); setMostrarNuevo(false); cargarDatos();
     alert("Insumo creado ✅");
   };
+
+  const facturaSeleccionada = facturas.find(f => f.id === facturaId);
 
   const input: React.CSSProperties = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", marginTop: 6, fontSize: 14, boxSizing: "border-box" };
   const lbl: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#555", letterSpacing: 0.3 };
@@ -63,7 +102,33 @@ export default function RemitosPage() {
       </div>
 
       <div style={card}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 24 }}>
+
+        {/* FACTURA VINCULADA */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>📎 Vincular a factura</div>
+          <div style={lbl}>FACTURA DE INSUMOS</div>
+          <select value={facturaId} onChange={(e) => setFacturaId(e.target.value)} style={input}>
+            <option value="">Sin vincular (buscar factura...)</option>
+            {facturas.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.Numero_factura} — {(f.proveedores as any)?.razon_social} — {f.Concepto?.slice(0, 40)} ({f.Fecha})
+              </option>
+            ))}
+          </select>
+
+          {facturaSeleccionada && (
+            <div style={{ marginTop: 10, background: "#f0faf4", borderRadius: 8, padding: 12, fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 20 }}>
+                <div><span style={{ color: "#888" }}>Proveedor:</span> <strong>{(facturaSeleccionada.proveedores as any)?.razon_social}</strong></div>
+                <div><span style={{ color: "#888" }}>Fecha:</span> <strong>{facturaSeleccionada.Fecha}</strong></div>
+                <div><span style={{ color: "#888" }}>Tipo:</span> <strong>{facturaSeleccionada.tipo_comprobante}</strong></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* DATOS REMITO */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 24, borderTop: "1px solid #f0f0f0", paddingTop: 20 }}>
           <div><div style={lbl}>FECHA *</div><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={input} /></div>
           <div><div style={lbl}>N° REMITO</div><input value={nroRemito} onChange={(e) => setNroRemito(e.target.value)} placeholder="Ej: 0001-00012345" style={input} /></div>
           <div>
@@ -75,6 +140,7 @@ export default function RemitosPage() {
           </div>
         </div>
 
+        {/* INSUMOS */}
         <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ fontWeight: 600, fontSize: 15 }}>Insumos *</div>
@@ -107,8 +173,16 @@ export default function RemitosPage() {
           <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} style={{ ...input, height: 80, resize: "vertical" }} />
         </div>
 
+        {!facturaId && (
+          <div style={{ marginTop: 16, background: "#fff8e1", borderRadius: 8, padding: 12, fontSize: 13, color: "#7c5c00" }}>
+            ⚠️ Este remito no está vinculado a ninguna factura. Se recomienda vincularlo para poder calcular el costo por unidad.
+          </div>
+        )}
+
         <div style={{ marginTop: 20 }}>
-          <button onClick={guardarRemito} style={{ padding: "12px 24px", background: "#0f1f17", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>💾 Guardar remito</button>
+          <button onClick={guardarRemito} style={{ padding: "12px 24px", background: "#0f1f17", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+            💾 Guardar remito
+          </button>
         </div>
       </div>
 
