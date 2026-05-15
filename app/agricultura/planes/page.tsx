@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const supabase = createBrowserClient(
@@ -22,6 +22,7 @@ type PlanItem = {
   cantidad_por_ha: string;
   unidad: string;
   alicuota_iva: string;
+  orden?: number;
 };
 
 const ITEM_VACIO: PlanItem = { categoria: "", descripcion: "", insumo_id: "", fecha_aplicacion: "", fecha_pago: "", cantidad_por_ha: "", unidad: "", alicuota_iva: "21%" };
@@ -40,6 +41,10 @@ export default function PlanesPage() {
   const [busquedaItems, setBusquedaItems] = useState<Record<number, string>>({});
   const [mostrarDropdown, setMostrarDropdown] = useState<Record<number, boolean>>({});
   const [filtroCultivo, setFiltroCultivo] = useState("");
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
 
   useEffect(() => { cargarDatos(); }, []);
 
@@ -70,20 +75,53 @@ export default function PlanesPage() {
     setCultivo(plan.cultivo || "");
     setCampaña(plan.campaña || "");
     setDescripcion(plan.descripcion || "");
-    const { data: itemsData } = await supabase.from("plan_items").select("*").eq("plan_id", plan.id).order("created_at");
-    setItems((itemsData || []).map((i: any) => ({
-      id: i.id,
-      categoria: i.categoria || "",
-      descripcion: i.descripcion || "",
-      insumo_id: i.insumo_id || "",
-      fecha_aplicacion: i.fecha_aplicacion || "",
-      fecha_pago: i.fecha_pago || "",
-      cantidad_por_ha: i.cantidad_por_ha?.toString() || "",
-      unidad: i.unidad || "",
-      alicuota_iva: i.alicuota_iva || "21%",
-    })));
+    const { data: itemsData } = await supabase.from("plan_items").select("*").eq("plan_id", plan.id).order("orden", { ascending: true });
+    setItems((itemsData || [])
+      .sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0))
+      .map((i: any) => ({
+        id: i.id,
+        categoria: i.categoria || "",
+        descripcion: i.descripcion || "",
+        insumo_id: i.insumo_id || "",
+        fecha_aplicacion: i.fecha_aplicacion || "",
+        fecha_pago: i.fecha_pago || "",
+        cantidad_por_ha: i.cantidad_por_ha?.toString() || "",
+        unidad: i.unidad || "",
+        alicuota_iva: i.alicuota_iva || "21%",
+        orden: i.orden,
+      })));
     setBusquedaItems({}); setMostrarDropdown({});
     setVista("form");
+  };
+
+  // DRAG & DROP
+  const handleDragStart = (index: number) => {
+    dragItem.current = index;
+    setDraggingIndex(index);
+  };
+
+  const handleDragEnter = (index: number) => {
+    dragOverItem.current = index;
+    setDragOverIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    if (dragItem.current === dragOverItem.current) {
+      setDraggingIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const newItems = [...items];
+    const dragged = newItems.splice(dragItem.current, 1)[0];
+    newItems.splice(dragOverItem.current, 0, dragged);
+    setItems(newItems);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+    // Limpiar busquedaItems para que los índices coincidan
+    setBusquedaItems({});
   };
 
   const agregarItem = () => setItems([...items, { ...ITEM_VACIO }]);
@@ -96,12 +134,7 @@ export default function PlanesPage() {
 
   const seleccionarInsumo = (index: number, insumo: any) => {
     const updated = [...items];
-    updated[index] = {
-      ...updated[index],
-      insumo_id: insumo.id,
-      descripcion: insumo.nombre,
-      unidad: insumo.unidad,
-    };
+    updated[index] = { ...updated[index], insumo_id: insumo.id, descripcion: insumo.nombre, unidad: insumo.unidad };
     setItems(updated);
     setBusquedaItems(prev => ({ ...prev, [index]: insumo.nombre }));
     setMostrarDropdown(prev => ({ ...prev, [index]: false }));
@@ -129,7 +162,7 @@ export default function PlanesPage() {
       planId = data?.id;
     }
     if (planId && items.length > 0) {
-      const itemsParaGuardar = items.filter(i => i.descripcion || i.insumo_id).map(i => ({
+      const itemsParaGuardar = items.filter(i => i.descripcion || i.insumo_id).map((i, index) => ({
         plan_id: planId,
         categoria: i.categoria,
         descripcion: i.descripcion,
@@ -140,6 +173,7 @@ export default function PlanesPage() {
         unidad: i.unidad,
         alicuota_iva: i.alicuota_iva,
         moneda: "USD",
+        orden: index + 1,
       }));
       await supabase.from("plan_items").insert(itemsParaGuardar);
     }
@@ -161,10 +195,7 @@ export default function PlanesPage() {
   };
 
   const planesFiltrados = planes.filter(p => !filtroCultivo || p.cultivo === filtroCultivo);
-  const totalItemsForm = items.reduce((acc, i) => {
-    const usd = calcularUSDporHA(i);
-    return acc + (usd || 0);
-  }, 0);
+  const totalItemsForm = items.reduce((acc, i) => acc + (calcularUSDporHA(i) || 0), 0);
 
   const input: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" };
   const lbl: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: "#555", letterSpacing: 0.3, marginBottom: 3, display: "block" };
@@ -231,7 +262,6 @@ export default function PlanesPage() {
               <button onClick={() => eliminarPlan(plan.id, plan.nombre)} style={{ padding: "8px 12px", background: "#fee", border: "1px solid #fcc", borderRadius: 8, cursor: "pointer", fontSize: 13, color: "red" }}>🗑</button>
             </div>
           </div>
-
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -248,27 +278,19 @@ export default function PlanesPage() {
                 </tr>
               </thead>
               <tbody>
-                {(plan.plan_items || []).map((item: any, i: number) => {
+                {(plan.plan_items || []).sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0)).map((item: any, i: number) => {
                   const precio = preciosInsumos[item.insumo_id] || null;
                   const usdHa = precio ? Number(item.cantidad_por_ha) * precio : null;
                   return (
                     <tr key={i}>
-                      <td style={td}>
-                        <span style={{ padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600, background: colorCategoria[item.categoria] || "#f5f5f5" }}>
-                          {item.categoria}
-                        </span>
-                      </td>
+                      <td style={td}><span style={{ padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600, background: colorCategoria[item.categoria] || "#f5f5f5" }}>{item.categoria}</span></td>
                       <td style={{ ...td, fontWeight: 500 }}>{item.descripcion}</td>
                       <td style={{ ...td, color: "#888" }}>{item.fecha_aplicacion}</td>
                       <td style={{ ...td, color: "#888" }}>{item.fecha_pago}</td>
                       <td style={{ ...td, textAlign: "right" }}>{Number(item.cantidad_por_ha).toFixed(2)}</td>
                       <td style={{ ...td, color: "#888" }}>{item.unidad}</td>
-                      <td style={{ ...td, textAlign: "right", color: precio ? "#0f1f17" : "#ccc" }}>
-                        {precio ? `USD ${precio.toFixed(2)}` : "Sin precio"}
-                      </td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 600, color: usdHa ? "#0f1f17" : "#ccc" }}>
-                        {usdHa ? `USD ${usdHa.toFixed(2)}` : "—"}
-                      </td>
+                      <td style={{ ...td, textAlign: "right", color: precio ? "#0f1f17" : "#ccc" }}>{precio ? `USD ${precio.toFixed(2)}` : "Sin precio"}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 600, color: usdHa ? "#0f1f17" : "#ccc" }}>{usdHa ? `USD ${usdHa.toFixed(2)}` : "—"}</td>
                       <td style={{ ...td, color: "#888" }}>{item.alicuota_iva}</td>
                     </tr>
                   );
@@ -325,6 +347,7 @@ export default function PlanesPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
+                <th style={{ ...th, width: 30 }}></th>
                 <th style={{ ...th, width: 130 }}>CATEGORÍA</th>
                 <th style={{ ...th, width: 220 }}>INSUMO / LABOR</th>
                 <th style={{ ...th, width: 120 }}>F. APLICACIÓN</th>
@@ -341,8 +364,24 @@ export default function PlanesPage() {
               {items.map((item, index) => {
                 const precio = getPrecioItem(item);
                 const usdHa = calcularUSDporHA(item);
+                const isDragging = draggingIndex === index;
+                const isDragOver = dragOverIndex === index;
                 return (
-                  <tr key={index} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <tr
+                    key={index}
+                    draggable
+                    onDragStart={() => handleDragStart(index)}
+                    onDragEnter={() => handleDragEnter(index)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => e.preventDefault()}
+                    style={{
+                      borderBottom: "1px solid #f0f0f0",
+                      opacity: isDragging ? 0.4 : 1,
+                      background: isDragOver && !isDragging ? "#e8f5e9" : "white",
+                      transition: "background 0.15s",
+                    }}
+                  >
+                    <td style={{ padding: "6px 8px", cursor: "grab", color: "#ccc", textAlign: "center", fontSize: 16 }}>⠿</td>
                     <td style={{ padding: "6px 8px" }}>
                       <select value={item.categoria} onChange={(e) => actualizarItem(index, "categoria", e.target.value)} style={input}>
                         <option value="">—</option>
@@ -406,7 +445,7 @@ export default function PlanesPage() {
             {items.length > 0 && (
               <tfoot>
                 <tr style={{ background: "#f0faf4" }}>
-                  <td colSpan={7} style={{ padding: "10px 12px", fontWeight: 700, textAlign: "right", fontSize: 13 }}>TOTAL / HA:</td>
+                  <td colSpan={8} style={{ padding: "10px 12px", fontWeight: 700, textAlign: "right", fontSize: 13 }}>TOTAL / HA:</td>
                   <td style={{ padding: "10px 12px", fontWeight: 800, fontSize: 15 }}>USD {totalItemsForm.toFixed(2)}</td>
                   <td colSpan={2}></td>
                 </tr>
