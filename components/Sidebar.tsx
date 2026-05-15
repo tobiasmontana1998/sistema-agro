@@ -27,6 +27,8 @@ const navItems = [
       { href: "/agricultura/stock", label: "Stock", icon: "📦" },
       { href: "/agricultura/remitos", label: "Remitos", icon: "📥" },
       { href: "/agricultura/historial-remitos", label: "Historial Remitos", icon: "📄" },
+      { href: "/agricultura/planes", label: "Planes de cultivos", icon: "📋" },
+
     ],
   },
 ];
