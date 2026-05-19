@@ -68,7 +68,7 @@ supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
     ];
 
     if (planId) {
-      queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)").eq("plan_id", planId).order("orden"));
+queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)").eq("plan_id", planId).order("orden") as any);
     }
 
     const results = await Promise.all(queries);
@@ -88,8 +88,7 @@ supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
     const laboresDelLote = laborIds;
     const todasSalidas = results[2].data || [];
     const salidasLote = todasSalidas.filter((s: any) => laboresDelLote.includes(s.referencia_id));
-    console.log("laborIds:", laborIds);
-console.log("salidasLote final:", salidasLote);
+  
     const facturasItems = results[3].data || [];
 
     const totalesPorInsumo: Record<string, { totalValor: number; totalCantidad: number }> = {};
@@ -120,7 +119,6 @@ console.log("salidasLote final:", salidasLote);
 
     for (const s of salidasLote) {
       const precio = precioPromedio[s.insumo_id] || 0;
-      console.log("precioPromedio Glifosato:", precioPromedio['6e5e5b6f-f39c-4016-85e2-71cad4cf5e4c']);
       const haLabor = haPorLabor[s.referencia_id] || 1;
       const costoporHa = (Number(s.cantidad) * precio) / haLabor;
       const categoria = (s.insumos?.subcategoria || s.insumos?.categoria || "OTRO").toUpperCase();
