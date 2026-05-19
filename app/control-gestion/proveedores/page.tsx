@@ -10,7 +10,7 @@ const supabase = createBrowserClient(
 
 const PROVINCIAS = ["Buenos Aires","CABA","Córdoba","Santa Fe","Entre Ríos","Mendoza","Tucumán","Salta","Chaco","Corrientes","Misiones","Santiago del Estero","San Juan","San Luis","La Rioja","Catamarca","Jujuy","Formosa","La Pampa","Neuquén","Río Negro","Chubut","Santa Cruz","Tierra del Fuego"];
 
-const FORM_VACIO = { cuit: "", razon_social: "", tipo_persona: "JURIDICA", condicion_iva: "RESPONSABLE_INSCRIPTO", domicilio_fiscal: "", localidad: "", provincia: "", telefono: "", email: "", cbu: "", alias_cbu: "", banco: "", contacto_nombre: "", contacto_telefono: "", notas: "" };
+const FORM_VACIO = { cuit: "", razon_social: "", tipo_persona: "JURIDICA", condicion_iva: "RESPONSABLE_INSCRIPTO", domicilio_fiscal: "", localidad: "", provincia: "", telefono: "", email: "", cbu: "", alias_cbu: "", banco: "", contacto_nombre: "", contacto_telefono: "", notas: "", tipo_proveedor: "Proveedor" };
 
 export default function ProveedoresPage() {
   const [vista, setVista] = useState<"lista" | "form">("lista");
@@ -51,6 +51,7 @@ export default function ProveedoresPage() {
       contacto_nombre: p.contacto_nombre || "",
       contacto_telefono: p.contacto_telefono || "",
       notas: p.notas || "",
+      tipo_proveedor: p.tipo_proveedor || "Proveedor",
     });
     setVista("form");
   };
@@ -59,7 +60,6 @@ export default function ProveedoresPage() {
 
   const guardarProveedor = async () => {
     if (!form.cuit || !form.razon_social) { alert("Completá CUIT y Razón Social"); return; }
-
     const payload = {
       ...form,
       emite_factura_a: form.condicion_iva === "RESPONSABLE_INSCRIPTO",
@@ -67,7 +67,6 @@ export default function ProveedoresPage() {
       emite_factura_c: form.condicion_iva === "MONOTRIBUTISTA",
       activo: true,
     };
-
     let error;
     if (editandoId) {
       const { error: e } = await supabase.from("proveedores").update(payload).eq("id", editandoId);
@@ -76,9 +75,7 @@ export default function ProveedoresPage() {
       const { error: e } = await supabase.from("proveedores").insert([payload]);
       error = e;
     }
-
     if (error) { alert(error.message); return; }
-
     setGuardado(true);
     await cargarProveedores();
     setTimeout(() => { setGuardado(false); setVista("lista"); }, 1500);
@@ -93,7 +90,6 @@ export default function ProveedoresPage() {
   const lbl: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#555", letterSpacing: 0.3 };
   const section: React.CSSProperties = { borderTop: "1px solid #f0f0f0", paddingTop: 20, marginTop: 20 };
 
-  // LISTA
   if (vista === "lista") return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -106,38 +102,39 @@ export default function ProveedoresPage() {
         </button>
       </div>
 
-      <input
-        placeholder="Buscar por razón social o CUIT..."
-        value={busqueda}
-        onChange={(e) => setBusqueda(e.target.value)}
-        style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, width: 320, marginBottom: 16 }}
-      />
+      <input placeholder="Buscar por razón social o CUIT..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+        style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, width: 320, marginBottom: 16 }} />
 
       <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#f8f9fa", borderBottom: "2px solid #eee" }}>
-              {["RAZÓN SOCIAL", "CUIT", "CONDICIÓN IVA", "LOCALIDAD", "TELÉFONO", "EMAIL", ""].map(h => (
+              {["RAZÓN SOCIAL", "CUIT", "TIPO", "CONDICIÓN IVA", "LOCALIDAD", "TELÉFONO", ""].map(h => (
                 <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: 0.5 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {proveedoresFiltrados.map((p) => (
-           <tr key={p.id}
-  style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
-  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#f9f9f9"}
-  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "white"}
-  onContextMenu={async (e) => {
-    e.preventDefault();
-    if (!confirm(`¿Eliminar a ${p.razon_social}?`)) return;
-    const { error } = await supabase.from("proveedores").delete().eq("id", p.id);
-    if (error) { alert("Error: " + error.message); return; }
-    setProveedores(prev => prev.filter(x => x.id !== p.id));
-  }}
->
+              <tr key={p.id}
+                style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#f9f9f9"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "white"}
+                onContextMenu={async (e) => {
+                  e.preventDefault();
+                  if (!confirm(`¿Eliminar a ${p.razon_social}?`)) return;
+                  const { error } = await supabase.from("proveedores").delete().eq("id", p.id);
+                  if (error) { alert("Error: " + error.message); return; }
+                  setProveedores(prev => prev.filter(x => x.id !== p.id));
+                }}
+              >
                 <td style={{ padding: "12px 14px", fontWeight: 600, fontSize: 14 }}>{p.razon_social}</td>
                 <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{p.cuit}</td>
+                <td style={{ padding: "12px 14px", fontSize: 13 }}>
+                  <span style={{ padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600, background: "#f0f0f0" }}>
+                    {p.tipo_proveedor || "Proveedor"}
+                  </span>
+                </td>
                 <td style={{ padding: "12px 14px", fontSize: 13 }}>
                   <span style={{
                     padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
@@ -149,7 +146,6 @@ export default function ProveedoresPage() {
                 </td>
                 <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{p.localidad || "—"}</td>
                 <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{p.telefono || "—"}</td>
-                <td style={{ padding: "12px 14px", fontSize: 13, color: "#888" }}>{p.email || "—"}</td>
                 <td style={{ padding: "12px 14px" }}>
                   <button onClick={() => abrirEdicion(p)} style={{ padding: "6px 14px", background: "#f5f5f5", border: "1px solid #e0e0e0", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
                     ✏️ Editar
@@ -166,7 +162,6 @@ export default function ProveedoresPage() {
     </div>
   );
 
-  // FORMULARIO
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
       <div style={{ marginBottom: 24, display: "flex", alignItems: "center", gap: 16 }}>
@@ -185,10 +180,14 @@ export default function ProveedoresPage() {
             <div><div style={lbl}>CUIT *</div><input value={form.cuit} onChange={(e) => set("cuit", e.target.value)} style={input} placeholder="30-50000000-1" /></div>
             <div><div style={lbl}>RAZÓN SOCIAL *</div><input value={form.razon_social} onChange={(e) => set("razon_social", e.target.value)} style={input} /></div>
             <div>
-              <div style={lbl}>TIPO DE PERSONA</div>
-              <select value={form.tipo_persona} onChange={(e) => set("tipo_persona", e.target.value)} style={input}>
-                <option value="JURIDICA">Jurídica</option>
-                <option value="FISICA">Física</option>
+              <div style={lbl}>TIPO DE PROVEEDOR</div>
+              <select value={form.tipo_proveedor || "Proveedor"} onChange={(e) => set("tipo_proveedor", e.target.value)} style={input}>
+                <option value="Proveedor">Proveedor</option>
+                <option value="Corredora">Corredora</option>
+                <option value="Acopiador">Acopiador</option>
+                <option value="Laboratorio">Laboratorio</option>
+                <option value="Transportista">Transportista</option>
+                <option value="Otro">Otro</option>
               </select>
             </div>
             <div>

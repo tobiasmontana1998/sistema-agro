@@ -12,13 +12,14 @@ const supabase = createBrowserClient(
 const navItems = [
   { section: "GENERAL", items: [{ href: "/", label: "Inicio", icon: "⊞" }] },
   {
-    section: "GESTIÓN",
-    items: [
-      { href: "/control-gestion/gastos", label: "Gastos", icon: "💳" },
-      { href: "/control-gestion/facturas", label: "Cargar Gasto", icon: "➕" },
-      { href: "/control-gestion/proveedores", label: "Proveedores", icon: "🏢" },
-    ],
-  },
+  section: "GESTIÓN",
+  items: [
+    { href: "/control-gestion/gastos", label: "Gastos", icon: "💳" },
+    { href: "/control-gestion/facturas", label: "Cargar Gasto", icon: "➕" },
+    { href: "/control-gestion/proveedores", label: "Proveedores", icon: "🏢" },
+    { href: "/control-gestion/liquidaciones", label: "Liquidaciones", icon: "🌾" },
+  ],
+},
   {
     section: "AGRICULTURA",
     items: [
@@ -28,7 +29,7 @@ const navItems = [
       { href: "/agricultura/remitos", label: "Remitos", icon: "📥" },
       { href: "/agricultura/historial-remitos", label: "Historial Remitos", icon: "📄" },
       { href: "/agricultura/planes", label: "Planes de cultivos", icon: "📋" },
-
+{ href: "/agricultura/margenes", label: "Márgenes", icon: "📊" },
     ],
   },
 ];

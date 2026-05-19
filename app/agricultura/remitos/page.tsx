@@ -20,29 +20,67 @@ export default function RemitosPage() {
   const [lineas, setLineas] = useState<{ insumo_id: string; cantidad: string }[]>([{ insumo_id: "", cantidad: "" }]);
   const [nuevoInsumo, setNuevoInsumo] = useState({ nombre: "", categoria: "", unidad: "" });
   const [mostrarNuevo, setMostrarNuevo] = useState(false);
+ const [filtroProveedor, setFiltroProveedor] = useState("");
+  const [itemsFactura, setItemsFactura] = useState<any[]>([]);
 
   useEffect(() => { cargarDatos(); }, []);
 
   // Cuando se selecciona una factura, autocompletar proveedor
-  useEffect(() => {
-    if (!facturaId) return;
-    const factura = facturas.find(f => f.id === facturaId);
-    if (factura?.proveedor_id) setProveedorId(factura.proveedor_id);
-  }, [facturaId]);
+ useEffect(() => {
+  if (!facturaId) {
+    setItemsFactura([]);
+    return;
+  }
+  const factura = facturas.find(f => f.id === facturaId);
+  if (factura?.proveedor_id) setProveedorId(factura.proveedor_id);
+ Promise.all([
+  supabase.from("factura_items").select("insumo_id, cantidad").eq("factura_id", facturaId),
+  supabase.from("stock_movimientos").select("insumo_id, cantidad").eq("factura_id", facturaId).eq("tipo", "entrada").eq("motivo", "remito"),
+]).then(([{ data: items }, { data: remitidos }]) => {
+ const remitidosData = remitidos || [];
+const itemsConDisponible = (items || []).map((item: any) => {
+  const yaRemitido = remitidosData
+    .filter((r: any) => r.insumo_id === item.insumo_id)
+    .reduce((acc: number, r: any) => acc + Number(r.cantidad), 0);
+  const disponible = Number(item.cantidad) - yaRemitido;
+  return { ...item, yaRemitido, disponible };
+});
+  setItemsFactura(itemsConDisponible);
+});
+}, [facturaId]);
 
   const cargarDatos = async () => {
-    const [{ data: ins }, { data: prov }, { data: facts }] = await Promise.all([
-      supabase.from("insumos").select(),
-      supabase.from("proveedores").select(),
-      supabase.from("facturas")
-        .select("id, Numero_factura, Concepto, Fecha, proveedor_id, proveedores(razon_social), tipo_comprobante")
-        .eq("Tipo", "Insumos")
-        .order("Fecha", { ascending: false }),
-    ]);
-    setInsumos(ins || []);
-    setProveedores(prov || []);
-    setFacturas(facts || []);
-  };
+  const [{ data: ins }, { data: prov }, { data: facts }, { data: remitidos }] = await Promise.all([
+    supabase.from("insumos").select(),
+    supabase.from("proveedores").select(),
+    supabase.from("facturas")
+      .select("id, Numero_factura, Concepto, Fecha, proveedor_id, proveedores(razon_social), tipo_comprobante, factura_items(insumo_id, cantidad, insumos(nombre))")
+      .eq("Tipo", "Insumos")
+      .order("Fecha", { ascending: false }),
+    supabase.from("stock_movimientos")
+      .select("factura_id, insumo_id, cantidad")
+      .eq("tipo", "entrada")
+      .eq("motivo", "remito")
+      .not("factura_id", "is", null),
+  ]);
+
+  setInsumos(ins || []);
+  setProveedores(prov || []);
+
+  const facturasConEstado = (facts || []).map((f: any) => {
+    const items = f.factura_items || [];
+    const completa = items.length > 0 && items.every((item: any) => {
+      const yaRemitido = (remitidos || [])
+        .filter((r: any) => r.factura_id === f.id && r.insumo_id === item.insumo_id)
+        .reduce((acc: number, r: any) => acc + Number(r.cantidad), 0);
+      return yaRemitido >= Number(item.cantidad);
+    });
+    const nombresInsumos = items.map((i: any) => i.insumos?.nombre).filter(Boolean).join(", ");
+    return { ...f, completa, nombresInsumos };
+  });
+
+  setFacturas(facturasConEstado);
+};
 
   const agregarLinea = () => setLineas([...lineas, { insumo_id: "", cantidad: "" }]);
   const actualizarLinea = (index: number, campo: string, valor: string) => {
@@ -58,26 +96,67 @@ export default function RemitosPage() {
   const guardarRemito = async () => {
     if (!fecha) { alert("Ingresá la fecha del remito"); return; }
     if (lineas.some(l => !l.insumo_id || !l.cantidad)) { alert("Completá todos los insumos"); return; }
-    const numeroRemito = nroRemito || `REM-${Date.now()}`;
+   if (facturaId && itemsFactura.length > 0) {
+  // Traer remitos ya asociados a esta factura
+  const { data: remitosExistentes } = await supabase
+    .from("stock_movimientos")
+    .select("insumo_id, cantidad")
+    .eq("factura_id", facturaId)
+    .eq("tipo", "entrada")
+    .eq("motivo", "remito");
 
-    for (const linea of lineas) {
-      const { error } = await supabase.from("stock_movimientos").insert([{
-        insumo_id: linea.insumo_id,
-        tipo: "entrada",
-        cantidad: Number(linea.cantidad),
-        motivo: "remito",
-        fecha,
-        proveedor_id: proveedorId || null,
-        numero_remito: numeroRemito,
-        observaciones,
-        factura_id: facturaId || null,
-      }]);
-      if (error) { alert("Error: " + error.message); return; }
+  for (const linea of lineas) {
+    if (!linea.insumo_id || !linea.cantidad) continue;
+    const itemFactura = itemsFactura.find(i => i.insumo_id === linea.insumo_id);
+    if (!itemFactura) continue;
+
+    const yaRemitido = (remitosExistentes || [])
+      .filter(r => r.insumo_id === linea.insumo_id)
+      .reduce((acc, r) => acc + Number(r.cantidad), 0);
+
+    const totalConNuevo = yaRemitido + Number(linea.cantidad);
+    if (totalConNuevo > Number(itemFactura.cantidad)) {
+      const insumoNombre = insumos.find(i => i.id === linea.insumo_id)?.nombre || "Insumo";
+      alert(`La cantidad de ${insumoNombre} supera la de la factura.\nFactura: ${itemFactura.cantidad} | Ya remitido: ${yaRemitido} | Nuevo: ${linea.cantidad} | Total: ${totalConNuevo}`);
+      return;
     }
+  }
+}
+    // Crear remito en tabla remitos
+const { data: remitoData, error: remitoError } = await supabase
+  .from("remitos")
+  .insert([{
+    numero_remito: nroRemito || null,
+    fecha,
+    proveedor_id: proveedorId || null,
+    observaciones,
+    factura_id: facturaId || null,
+  }])
+  .select()
+  .single();
 
-    setFecha(""); setNroRemito(""); setProveedorId(""); setFacturaId("");
-    setObservaciones(""); setLineas([{ insumo_id: "", cantidad: "" }]);
-    alert("Remito guardado ✅");
+if (remitoError) { alert("Error creando remito: " + remitoError.message); return; }
+
+// Crear movimientos de stock vinculados al remito
+for (const linea of lineas) {
+  const { error } = await supabase.from("stock_movimientos").insert([{
+    insumo_id: linea.insumo_id,
+    tipo: "entrada",
+    cantidad: Number(linea.cantidad),
+    motivo: "remito",
+    fecha,
+    proveedor_id: proveedorId || null,
+    numero_remito: nroRemito || null,
+    observaciones,
+    factura_id: facturaId || null,
+    remito_id: remitoData.id,
+  }]);
+  if (error) { alert("Error: " + error.message); return; }
+}
+
+setFecha(""); setNroRemito(""); setProveedorId(""); setFacturaId("");
+setObservaciones(""); setLineas([{ insumo_id: "", cantidad: "" }]);
+alert(`Remito R-${remitoData.numero} guardado ✅`);
   };
 
   const guardarInsumo = async () => {
@@ -106,15 +185,28 @@ export default function RemitosPage() {
         {/* FACTURA VINCULADA */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>📎 Vincular a factura</div>
-          <div style={lbl}>FACTURA DE INSUMOS</div>
-          <select value={facturaId} onChange={(e) => setFacturaId(e.target.value)} style={input}>
-            <option value="">Sin vincular (buscar factura...)</option>
-            {facturas.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.Numero_factura} — {(f.proveedores as any)?.razon_social} — {f.Concepto?.slice(0, 40)} ({f.Fecha})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
+  <div>
+    <div style={lbl}>FILTRAR POR PROVEEDOR</div>
+    <select value={filtroProveedor} onChange={(e) => { setFiltroProveedor(e.target.value); setFacturaId(""); }} style={input}>
+      <option value="">Todos los proveedores</option>
+      {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
+    </select>
+  </div>
+  <div>
+    <div style={lbl}>FACTURA DE INSUMOS</div>
+    <select value={facturaId} onChange={(e) => setFacturaId(e.target.value)} style={input}>
+      <option value="">Sin vincular</option>
+      {facturas
+  .filter(f => (!filtroProveedor || f.proveedor_id === filtroProveedor) && !f.completa)
+  .map((f) => (
+    <option key={f.id} value={f.id}>
+      {f.Numero_factura} — {f.nombresInsumos || f.Concepto?.slice(0, 30)} ({f.Fecha})
+    </option>
+  ))}
+    </select>
+  </div>
+</div>
 
           {facturaSeleccionada && (
             <div style={{ marginTop: 10, background: "#f0faf4", borderRadius: 8, padding: 12, fontSize: 13 }}>
@@ -160,8 +252,19 @@ export default function RemitosPage() {
                 </select>
               </div>
               <div>
-                <div style={{ ...lbl, marginBottom: 4 }}>CANTIDAD</div>
-                <input type="number" value={linea.cantidad} onChange={(e) => actualizarLinea(index, "cantidad", e.target.value)} style={input} />
+               <div style={{ ...lbl, marginBottom: 4 }}>
+  CANTIDAD
+  {facturaId && itemsFactura.find(i => i.insumo_id === linea.insumo_id) && (
+    <span style={{ color: "#888", fontWeight: 400, marginLeft: 8 }}>
+{(() => {
+  const item = itemsFactura.find(i => i.insumo_id === linea.insumo_id);
+  if (!item) return null;
+  return ` — factura: ${item.cantidad} | ya remitido: ${item.yaRemitido} | disponible: ${item.disponible}`;
+})()}
+    </span>
+  )}
+</div>
+<input type="number" value={linea.cantidad} onChange={(e) => actualizarLinea(index, "cantidad", e.target.value)} style={input} /> 
               </div>
               <button onClick={() => quitarLinea(index)} style={{ padding: "10px 14px", background: "#fee", border: "1px solid #fcc", borderRadius: 8, cursor: "pointer", color: "red" }}>✕</button>
             </div>

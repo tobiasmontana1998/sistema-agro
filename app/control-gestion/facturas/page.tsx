@@ -34,6 +34,9 @@ function CargarFacturaInner() {
   const [actividades, setActividades] = useState<any[]>([]);
   const [labor, setLabor] = useState("");
   const [labores, setLabores] = useState<any[]>([]);
+  const [remitos, setRemitos] = useState<any[]>([]);
+const [remito, setRemito] = useState("");
+const [filtroProveedorRemito, setFiltroProveedorRemito] = useState("");
   const [dolar, setDolar] = useState<number | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -62,21 +65,27 @@ function CargarFacturaInner() {
   const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("actividades").select(),
-      supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social"),
-      supabase.from("labores").select(),
-      supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
-      supabase.from("insumos").select().order("nombre"),
-    ]).then(([{ data: acts }, { data: provs }, { data: labs }, { data: facts }, { data: ins }]) => {
-      setActividades(acts || []);
-      setProveedores(provs || []);
-      setLabores(labs || []);
-      setFacturas(facts || []);
-      setInsumos(ins || []);
-    });
+Promise.all([
+  supabase.from("actividades").select(),
+  supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social"),
+  supabase.from("labores").select(),
+  supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
+  supabase.from("insumos").select().order("nombre"),
+  supabase.from("remitos").select("id, numero, numero_remito, fecha, proveedor_id, proveedores(razon_social), stock_movimientos(insumo_id, cantidad, insumos(nombre))").is("factura_id", null).order("created_at", { ascending: false }),
+]).then(([{ data: acts }, { data: provs }, { data: labs }, { data: facts }, { data: ins }, { data: rems }]) => {
+  setActividades(acts || []);
+  setProveedores(provs || []);
+  setLabores(labs || []);
+  setFacturas(facts || []);
+  setInsumos(ins || []);
+  const remitosUnicos = (rems || []).reduce((acc: any[], r: any) => {
+    const key = `${r.numero_remito}-${r.fecha}`;
+    if (!acc.find((x: any) => `${x.numero_remito}-${x.fecha}` === key)) acc.push(r);
+    return acc;
   }, []);
-
+  setRemitos(remitosUnicos);
+});
+}, []); 
   const obtenerDolarPorFecha = async (fecha: string) => {
     try {
       const res = await fetch("https://api.bluelytics.com.ar/v2/evolution.json");
@@ -105,7 +114,13 @@ function CargarFacturaInner() {
       setTipo(data.Tipo || "");
       setTipoComprobante(data.tipo_comprobante || "");
       setPagador(data.Pagador || "");
-      setMontoIngresado(data.Monto || "");
+      const monedaFactura = data.moneda || "ARS";
+setMoneda(monedaFactura);
+setMontoIngresado(
+  monedaFactura === "USD"
+    ? (data.monto_neto / (data.dolar || 1)).toFixed(2)
+    : data.monto_neto?.toString() || ""
+);
       setAlicuotaIva(data.alicuota_iva?.toString() || "21");
       setPercepciones(data.percepciones || "");
       setRetenciones(data.retenciones || "");
@@ -190,6 +205,7 @@ function CargarFacturaInner() {
       Labor_id: labor || null,
       factura_original_id: facturaOriginalId || null,
       pdf_url: urlPdf || null,
+      
     };
 
     let facturaId = id;
@@ -205,7 +221,11 @@ function CargarFacturaInner() {
     }
 
     if (error) { alert(error.message); return; }
-
+    // Vincular remito a la factura
+if (remito && facturaId) {
+  await supabase.from("remitos").update({ factura_id: facturaId }).eq("id", remito);
+  await supabase.from("stock_movimientos").update({ factura_id: facturaId }).eq("remito_id", remito);
+}
     if (facturaId && items.length > 0) {
       await supabase.from("factura_items").delete().eq("factura_id", facturaId);
       const itemsParaGuardar = items
@@ -494,14 +514,69 @@ function CargarFacturaInner() {
             )}
           </div>
 
-          <div style={section}>
-            <div style={lbl}>LABOR ASOCIADA</div>
-            <select value={labor} onChange={(e) => setLabor(e.target.value)} style={input}>
-              <option value="">Sin asociar</option>
-              {labores.map((l) => <option key={l.id} value={l.id}>#{l.numero} - {l.Tipo}</option>)}
-            </select>
-          </div>
+  <div style={section}>
+  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+    {tipo === "Insumos" ? "📦 Remito asociado" : "🚜 Labor asociada"}
+  </div>
 
+  {tipo === "Insumos" ? (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
+  <div>
+    <div style={lbl}>FILTRAR POR PROVEEDOR</div>
+    <select value={filtroProveedorRemito} onChange={(e) => { setFiltroProveedorRemito(e.target.value); setRemito(""); }} style={input}>
+      <option value="">Todos los proveedores</option>
+      {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
+    </select>
+  </div>
+  <div>
+    <div style={lbl}>SELECCIONAR REMITO</div>
+    <select value={remito} onChange={(e) => setRemito(e.target.value)} style={input}>
+      <option value="">Sin asociar</option>
+      {remitos
+        .filter(r => !filtroProveedorRemito || r.proveedor_id === filtroProveedorRemito)
+        .map((r, i) => (
+  <option key={i} value={r.id}>
+R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.fecha} — {r.proveedores?.razon_social || "Sin proveedor"} — {(r.stock_movimientos || []).map((m: any) => m.insumos?.nombre).filter(Boolean).join(", ")}
+  </option>
+))}
+    </select>
+  </div>
+</div>
+    </>
+  ) : (
+    <>
+      <div style={lbl}>SELECCIONAR LABOR</div>
+      <select value={labor} onChange={(e) => setLabor(e.target.value)} style={input}>
+        <option value="">Sin asociar</option>
+        {labores.map((l) => {
+  const costoLabor = l.Costo_total || 0;
+  const coincide = montoNeto > 0 && Math.abs(costoLabor - montoNeto) < 1;
+  const nroLabor = l.numero ? `L-${String(l.numero).padStart(3, "0")}` : "";
+  return (
+    <option key={l.id} value={l.id} disabled={montoNeto > 0 && !coincide}>
+      {nroLabor} — {l.Tipo} — {l.Fecha} — ${Number(l.Costo_total || 0).toLocaleString("es-AR")}
+      {montoNeto > 0 && coincide ? " ✅" : montoNeto > 0 ? " ❌ monto no coincide" : ""}
+    </option>
+  );
+})}
+      </select>
+      {labor && montoNeto > 0 && (() => {
+        const laborSel = labores.find(l => l.id === labor);
+        const coincide = laborSel && Math.abs((laborSel.Costo_total || 0) - montoNeto) < 1;
+        return coincide ? (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#2e7d32", background: "#e8f5e9", padding: "6px 12px", borderRadius: 6 }}>
+            ✅ El monto coincide con el costo del labor
+          </div>
+        ) : (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#c62828", background: "#ffebee", padding: "6px 12px", borderRadius: 6 }}>
+            ⚠️ El monto no coincide — Labor: ${Number(laborSel?.Costo_total || 0).toLocaleString("es-AR")} / Factura (neto): ${montoNeto.toLocaleString("es-AR")}
+          </div>
+        );
+      })()}
+    </>
+  )}
+</div>
           <div style={section}>
             <div style={lbl}>ADJUNTAR PDF</div>
             <div style={{ marginTop: 8 }}>
@@ -585,6 +660,7 @@ function CargarFacturaInner() {
     </div>
   );
 }
+
 
 export default function Page() {
   return (

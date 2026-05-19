@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
+import { useRouter } from "next/navigation";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,6 +10,7 @@ const supabase = createBrowserClient(
 );
 
 export default function HistorialRemitosPage() {
+  const router = useRouter();
   const [remitos, setRemitos] = useState<any[]>([]);
   const [proveedores, setProveedores] = useState<any[]>([]);
   const [insumos, setInsumos] = useState<any[]>([]);
@@ -29,7 +31,8 @@ export default function HistorialRemitosPage() {
   const cargarDatos = async () => {
     setLoading(true);
     const [{ data: movimientos }, { data: provs }, { data: ins }] = await Promise.all([
-      supabase.from("stock_movimientos").select("*, insumos(nombre, unidad), proveedores(razon_social)").eq("tipo", "entrada").order("fecha", { ascending: false }),
+supabase.from("stock_movimientos").select("*, insumos(nombre, unidad), proveedores(razon_social), remitos(numero, numero_remito)").eq("tipo", "entrada").order("fecha", { ascending: false }),
+
       supabase.from("proveedores").select(),
       supabase.from("insumos").select(),
     ]);
@@ -43,13 +46,14 @@ export default function HistorialRemitosPage() {
     for (const m of movimientos) {
       const key = m.numero_remito || m.id;
       if (!agrupados[key]) {
-        agrupados[key] = {
-          numero_remito: key,
-          fecha: m.fecha,
-          proveedor_id: m.proveedor_id,
-          proveedor: m.proveedores?.razon_social || "Sin proveedor",
-          lineas: [],
-        };
+       agrupados[key] = {
+  numero_remito: key,
+  numero_sistema: m.remitos?.numero ? `R-${String(m.remitos.numero).padStart(3, "0")}` : "—",
+  fecha: m.fecha,
+  proveedor_id: m.proveedor_id,
+  proveedor: m.proveedores?.razon_social || "Sin proveedor",
+  lineas: [],
+};
       }
       agrupados[key].lineas.push({
         id: m.id,
@@ -183,7 +187,8 @@ export default function HistorialRemitosPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f5f5f5", textAlign: "left" }}>
-                <th style={{ padding: "12px 16px" }}>N° Remito</th>
+<th style={{ padding: "12px 16px" }}>N° Sistema</th>
+<th style={{ padding: "12px 16px" }}>N° Remito</th>
                 <th style={{ padding: "12px 16px" }}>Fecha</th>
                 <th style={{ padding: "12px 16px" }}>Proveedor</th>
                 <th style={{ padding: "12px 16px" }}>Insumos</th>
@@ -259,7 +264,8 @@ export default function HistorialRemitosPage() {
                     onMouseEnter={(e) => (e.currentTarget.style.background = "#f9f9f9")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
                   >
-                    <td style={{ padding: "12px 16px", fontWeight: 600 }}>{remito.numero_remito}</td>
+                   <td style={{ padding: "12px 16px", fontWeight: 600, color: "#0f1f17" }}>{remito.numero_sistema}</td>
+<td style={{ padding: "12px 16px" }}>{remito.numero_remito || "—"}</td>
                     <td style={{ padding: "12px 16px" }}>{remito.fecha || "Sin fecha"}</td>
                     <td style={{ padding: "12px 16px" }}>{remito.proveedor}</td>
                     <td style={{ padding: "12px 16px" }}>
@@ -270,6 +276,10 @@ export default function HistorialRemitosPage() {
                       ))}
                     </td>
                     <td style={{ padding: "12px 16px" }}>
+                      <button onClick={(e) => { e.stopPropagation(); router.push(`/agricultura/historial-remitos/editar/${encodeURIComponent(remito.numero_remito)}`); }}
+  style={{ background: "#f0f4ff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, padding: "5px 10px", marginRight: 6 }}>
+  ✏️ Editar
+</button>
                       <button
                         onClick={(e) => { e.stopPropagation(); eliminarRemito(remito); }}
                         style={{ background: "#fee", border: "1px solid #fcc", color: "red", padding: "5px 10px", borderRadius: 6, cursor: "pointer", fontSize: 13 }}

@@ -13,6 +13,7 @@ export default function Gastos() {
   const [gastos, setGastos] = useState<any[]>([]);
   const [pagos, setPagos] = useState<any[]>([]);
   const [remitos, setRemitos] = useState<any[]>([]);
+  const [itemsData, setItemsData] = useState<any[]>([]);
   const [filtro, setFiltro] = useState("");
   const [orden, setOrden] = useState("fecha");
   const [filtroRemito, setFiltroRemito] = useState("todos");
@@ -24,26 +25,45 @@ export default function Gastos() {
   useEffect(() => { cargarDatos(); }, []);
 
   const cargarDatos = async () => {
-    const [{ data: facturas }, { data: pagosData }, { data: remitosData }] = await Promise.all([
+    const [{ data: facturas }, { data: pagosData }, { data: remitosData }, { data: items }] = await Promise.all([
       supabase.from("facturas").select(`
         id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, Pagador, pdf_url,
         Monto, monto_usd, dolar, pagada, moneda, proveedor_id,
-        proveedores:proveedor_id (razon_social),
-        actividades (nombre),
-        labores (numero)
+        tipo_comprobante, monto_neto, monto_iva, percepciones, retenciones,
+        proveedores!fk_facturas_proveedor (razon_social, cuit),
+        actividades!fk_facturas_actividad (nombre),
+        labores!fk_facturas_labor (numero)
       `).order("Fecha", { ascending: false }),
       supabase.from("pagos_facturas").select("*"),
-      supabase.from("stock_movimientos").select("factura_id").eq("tipo", "entrada").not("factura_id", "is", null),
+      supabase.from("stock_movimientos").select("factura_id, insumo_id, cantidad").eq("tipo", "entrada").eq("motivo", "remito").not("factura_id", "is", null),
+      supabase.from("factura_items").select("factura_id, insumo_id, cantidad"),
     ]);
     setGastos(facturas || []);
     setPagos(pagosData || []);
     setRemitos(remitosData || []);
+    setItemsData(items || []);
     return { facturas, pagosData };
   };
 
-  // IDs de facturas que ya tienen remito vinculado
-  const facturasConRemito = new Set(remitos.map(r => r.factura_id));
-  const tieneRemito = (facturaId: string) => facturasConRemito.has(facturaId);
+  const getEstadoRemito = (facturaId: string) => {
+    const itemsFactura = itemsData.filter((i: any) => i.factura_id === facturaId);
+    const algunoRemitido = remitos.some(r => r.factura_id === facturaId);
+
+    if (itemsFactura.length === 0) return algunoRemitido ? "vinculado" : "sin_remito";
+
+    const todosCompletos = itemsFactura.every((item: any) => {
+      const remitido = remitos
+        .filter(r => r.factura_id === facturaId && r.insumo_id === item.insumo_id)
+        .reduce((acc: number, r: any) => acc + Number(r.cantidad), 0);
+      return remitido >= Number(item.cantidad);
+    });
+
+    if (todosCompletos) return "vinculado";
+    if (algunoRemitido) return "parcial";
+    return "sin_remito";
+  };
+
+  const tieneRemito = (facturaId: string) => getEstadoRemito(facturaId) !== "sin_remito";
 
   const eliminarGasto = async (id: string) => {
     if (!confirm("¿Eliminar gasto?")) return;
@@ -78,6 +98,49 @@ export default function Gastos() {
     a.click();
   };
 
+  const exportarIVAComprasTXT = () => {
+    const tipoComprobanteMap: Record<string, string> = {
+      "Factura A": "001", "Factura B": "006", "Factura C": "011",
+      "Nota de Crédito A": "003", "Nota de Crédito B": "008", "Nota de Crédito C": "013",
+      "Recibo": "004",
+    };
+    const monedaMap: Record<string, string> = { "ARS": "PES", "USD": "DOL" };
+
+    const lineas = gastos
+      .filter(g => g.proveedores?.cuit && g.tipo_comprobante)
+      .map(g => {
+        const fecha = g.Fecha?.replace(/-/g, "");
+        const tipoComp = tipoComprobanteMap[g.tipo_comprobante] || "001";
+        const partes = (g.Numero_factura || "0000-00000000").split("-");
+        const puntoVenta = (partes[0] || "0000").padStart(5, "0");
+        const nroComp = (partes[1] || "00000000").padStart(8, "0");
+        const cuitSinGuiones = (g.proveedores?.cuit || "").replace(/-/g, "");
+        const moneda = monedaMap[g.moneda] || "PES";
+        const tipoCambio = g.moneda === "USD" ? Number(g.dolar).toFixed(6) : "1.000000";
+        const alicuota = Number(g.alicuota_iva || 21);
+
+        return [
+          fecha, tipoComp, puntoVenta, nroComp, "",
+          "80", cuitSinGuiones, g.proveedores?.razon_social || "",
+          Number(g.Monto).toFixed(2), "0.00",
+          alicuota === 0 ? Number(g.monto_neto || 0).toFixed(2) : "0.00",
+          "0.00", "0.00",
+          Number(g.percepciones || 0).toFixed(2),
+          "0.00", "0.00",
+          moneda, tipoCambio, "1", "",
+          Number(g.monto_iva || 0).toFixed(2),
+          Number(g.retenciones || 0).toFixed(2),
+          "", "", "0.00",
+        ].join(",");
+      });
+
+    const blob = new Blob([lineas.join("\n")], { type: "text/plain;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `IVA_Compras_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+  };
+
   const esUSD = (g: any) => g.moneda === "USD";
 
   const abrirModalPago = (g: any) => {
@@ -108,7 +171,10 @@ export default function Gastos() {
 
   const gastosFiltrados = gastos
     .filter((g) => {
-      const matchTexto = g.proveedores?.razon_social?.toLowerCase().includes(filtro.toLowerCase()) || g.Concepto?.toLowerCase().includes(filtro.toLowerCase());
+      const matchTexto = !filtro ||
+        g.proveedores?.razon_social?.toLowerCase().includes(filtro.toLowerCase()) ||
+        g.Concepto?.toLowerCase().includes(filtro.toLowerCase()) ||
+        g.Numero_factura?.toLowerCase().includes(filtro.toLowerCase());
       if (!matchTexto) return false;
       if (filtroRemito === "sin_remito") return g.Tipo === "Insumos" && !tieneRemito(g.id);
       if (filtroRemito === "con_remito") return g.Tipo === "Insumos" && tieneRemito(g.id);
@@ -124,7 +190,7 @@ export default function Gastos() {
   const pctOC = totalPagado > 0 ? ((totalPagadoOC / totalPagado) * 100).toFixed(1) : "0";
   const diferenciaOC = totalPagadoOC - totalPagado * 0.8;
   const diferenciaCT = totalPagadoCT - totalPagado * 0.2;
-  const sinRemitoCount = gastos.filter(g => g.Tipo === "Insumos" && !tieneRemito(g.id)).length;
+  const sinRemitoCount = gastos.filter(g => g.Tipo === "Insumos" && getEstadoRemito(g.id) === "sin_remito").length;
 
   const dataPie = [{ name: "CT", value: totalPagadoCT }, { name: "OC", value: totalPagadoOC }];
   const COLORS = ["#f5c542", "#0f1f17"];
@@ -208,7 +274,14 @@ export default function Gastos() {
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Gastos del Período</h1>
           <p style={{ margin: "4px 0 0", color: "#888", fontSize: 14 }}>Visualización completa de erogaciones y costos.</p>
         </div>
-        <button onClick={exportarCSV} style={{ padding: "10px 20px", borderRadius: 8, border: "none", background: "#0f1f17", color: "white", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>⬇ Exportar CSV</button>
+        <div style={{ display: "flex", gap: 12 }}>
+          <button onClick={exportarIVAComprasTXT} style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #e0e0e0", background: "white", color: "#0f1f17", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+            📋 Exportar IVA ARCA
+          </button>
+          <button onClick={exportarCSV} style={{ padding: "10px 20px", borderRadius: 8, border: "none", background: "#0f1f17", color: "white", cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+            ⬇ Exportar CSV
+          </button>
+        </div>
       </div>
 
       {/* ALERTA REMITOS PENDIENTES */}
@@ -217,10 +290,7 @@ export default function Gastos() {
           <div style={{ fontSize: 14, color: "#e65100" }}>
             ⚠️ <strong>{sinRemitoCount} factura{sinRemitoCount > 1 ? "s" : ""} de insumos</strong> sin remito vinculado
           </div>
-          <button
-            onClick={() => setFiltroRemito("sin_remito")}
-            style={{ fontSize: 13, padding: "6px 14px", background: "#e65100", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}
-          >
+          <button onClick={() => setFiltroRemito("sin_remito")} style={{ fontSize: 13, padding: "6px 14px", background: "#e65100", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
             Ver sin remito
           </button>
         </div>
@@ -335,7 +405,7 @@ export default function Gastos() {
               const saldo = g.Monto - totalPagadoFactura;
               const facturaUSD = esUSD(g);
               const esInsumo = g.Tipo === "Insumos";
-              const conRemito = tieneRemito(g.id);
+              const estadoRemito = getEstadoRemito(g.id);
 
               return (
                 <tr
@@ -357,8 +427,10 @@ export default function Gastos() {
                   </td>
                   <td style={td}>
                     {esInsumo ? (
-                      conRemito ? (
+                      estadoRemito === "vinculado" ? (
                         <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>✅ Vinculado</span>
+                      ) : estadoRemito === "parcial" ? (
+                        <span style={{ background: "#e3f2fd", color: "#1565c0", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>🔄 Parcial</span>
                       ) : (
                         <a href="/agricultura/remitos" onClick={(e) => e.stopPropagation()} style={{ background: "#fff3e0", color: "#e65100", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>⚠️ Sin remito</a>
                       )
@@ -406,7 +478,30 @@ export default function Gastos() {
                     ) : <span style={{ color: "#ccc", fontSize: 12 }}>—</span>}
                   </td>
                   <td style={td}>
-                    <button onClick={(e) => { e.stopPropagation(); eliminarGasto(g.id); }} style={{ background: "#fee", border: "1px solid #fcc", color: "red", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>🗑</button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {(g.Labor_id || g.labores?.numero) && (
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm("¿Desvincular la labor de esta factura?")) return;
+                          await supabase.from("facturas").update({ Labor_id: null }).eq("id", g.id);
+                          cargarDatos();
+                        }} style={{ background: "#fff3e0", border: "1px solid #ffcc80", color: "#e65100", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                          🔗 Desvincular labor
+                        </button>
+                      )}
+                      {g.Tipo === "Insumos" && estadoRemito !== "sin_remito" && (
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm("¿Desvincular el remito de esta factura?")) return;
+                          await supabase.from("remitos").update({ factura_id: null }).eq("factura_id", g.id);
+                          await supabase.from("stock_movimientos").update({ factura_id: null }).eq("factura_id", g.id);
+                          cargarDatos();
+                        }} style={{ background: "#fff3e0", border: "1px solid #ffcc80", color: "#e65100", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                          🔗 Desvincular remito
+                        </button>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); eliminarGasto(g.id); }} style={{ background: "#fee", border: "1px solid #fcc", color: "red", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>🗑</button>
+                    </div>
                   </td>
                 </tr>
               );
