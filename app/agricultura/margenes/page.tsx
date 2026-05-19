@@ -61,8 +61,8 @@ export default function MargenesPage() {
 
   const cargarDatosLote = async (loteId: string, planId: string | null) => {
     const queries: Promise<any>[] = [
-      supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId),
-      supabase.from("labores").select("*").eq("Lote_id", loteId),
+supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
+        supabase.from("labores").select("*").eq("Lote_id", loteId),
       supabase.from("stock_movimientos").select("insumo_id, cantidad, referencia_id, insumos(categoria, subcategoria)").eq("tipo", "salida").eq("motivo", "labor"),
       supabase.from("factura_items").select("insumo_id, cantidad, precio_unitario, facturas!factura_items_factura_id_fkey(moneda, dolar)"),
     ];
