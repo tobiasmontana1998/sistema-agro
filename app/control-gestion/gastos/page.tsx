@@ -204,8 +204,7 @@ export default function Gastos() {
   const td: React.CSSProperties = { padding: "11px 14px", fontSize: 13 };
 
   return (
-    <div style={{ maxWidth: 1300, margin: "0 auto" }}>
-
+<div style={{ maxWidth: 1500, margin: "0 auto", overflowX: "auto" }}>
       {/* MODAL PAGO */}
       {modalPago && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -378,7 +377,7 @@ export default function Gastos() {
       </div>
 
       {/* TABLA */}
-      <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+<div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#f8f9fa", borderBottom: "2px solid #eee" }}>
