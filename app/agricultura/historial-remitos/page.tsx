@@ -108,18 +108,26 @@ supabase.from("stock_movimientos").select("*, insumos(nombre, unidad), proveedor
     await cargarDatos();
   };
 
-  const eliminarRemito = async (remito: any) => {
-    if (!confirm(`¿Eliminar el remito ${remito.numero_remito}?`)) return;
+ const eliminarRemito = async (remito: any) => {
+  // Verificar si tiene factura vinculada
+  const { data: remitoData } = await supabase
+    .from("remitos")
+    .select("factura_id, numero")
+    .eq("numero_remito", remito.numero_remito)
+    .single();
 
-    const ids = remito.lineas.map((l: any) => l.id);
-    const { error } = await supabase
-      .from("stock_movimientos")
-      .delete()
-      .in("id", ids);
+  if (remitoData?.factura_id) {
+    alert(`No se puede eliminar el remito R-${String(remitoData.numero).padStart(3, "0")} porque tiene una factura vinculada. Desvinculala primero desde Gastos.`);
+    return;
+  }
 
-    if (error) { alert("Error eliminando: " + error.message); return; }
-    cargarDatos();
-  };
+  if (!confirm(`¿Eliminar el remito ${remito.numero_remito}?`)) return;
+
+  const ids = remito.lineas.map((l: any) => l.id);
+  await supabase.from("stock_movimientos").delete().in("id", ids);
+  await supabase.from("remitos").delete().eq("numero_remito", remito.numero_remito);
+  cargarDatos();
+};
 
   const inputStyle: React.CSSProperties = {
     padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc",
