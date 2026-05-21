@@ -55,7 +55,7 @@ function CargarFacturaInner() {
 
   const esNotaCredito = tipoComprobante.includes("Nota de Crédito");
 
-  const montoEnUSD = moneda === "USD" ? Number(montoIngresado) : (dolar ? Number(montoIngresado) / dolar : 0);
+const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dolar : 0);
   const montoNetoPuro = Number(montoIngresado) || 0;
   const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
   const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
