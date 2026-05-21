@@ -28,14 +28,15 @@ function CargarFacturaInner() {
   const [alicuotaIva, setAlicuotaIva] = useState("21");
   const [percepciones, setPercepciones] = useState("");
   const [retenciones, setRetenciones] = useState("");
+  const [noGravado, setNoGravado] = useState("");
   const [facturaOriginalId, setFacturaOriginalId] = useState("");
   const [actividad, setActividad] = useState("");
   const [actividades, setActividades] = useState<any[]>([]);
   const [labor, setLabor] = useState("");
   const [labores, setLabores] = useState<any[]>([]);
   const [remitos, setRemitos] = useState<any[]>([]);
-const [remito, setRemito] = useState("");
-const [filtroProveedorRemito, setFiltroProveedorRemito] = useState("");
+  const [remito, setRemito] = useState("");
+  const [filtroProveedorRemito, setFiltroProveedorRemito] = useState("");
   const [dolar, setDolar] = useState<number | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -54,37 +55,32 @@ const [filtroProveedorRemito, setFiltroProveedorRemito] = useState("");
 
   const esNotaCredito = tipoComprobante.includes("Nota de Crédito");
 
-  const montoEnARS = moneda === "USD" && dolar ? Number(montoIngresado) * dolar : Number(montoIngresado);
   const montoEnUSD = moneda === "USD" ? Number(montoIngresado) : (dolar ? Number(montoIngresado) / dolar : 0);
   const montoNetoPuro = Number(montoIngresado) || 0;
   const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
-  const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0);
+  const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
   const montoNeto = moneda === "USD" ? montoNetoPuro * (dolar || 1) : montoNetoPuro;
   const montoIva = moneda === "USD" ? montoIvaPuro * (dolar || 1) : montoIvaPuro;
   const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
 
   useEffect(() => {
-Promise.all([
-  supabase.from("actividades").select(),
-  supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social"),
-  supabase.from("labores").select(),
-  supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
-  supabase.from("insumos").select().order("nombre"),
-  supabase.from("remitos").select("id, numero, numero_remito, fecha, proveedor_id, proveedores(razon_social), stock_movimientos(insumo_id, cantidad, insumos(nombre))").is("factura_id", null).order("created_at", { ascending: false }),
-]).then(([{ data: acts }, { data: provs }, { data: labs }, { data: facts }, { data: ins }, { data: rems }]) => {
-  setActividades(acts || []);
-  setProveedores(provs || []);
-  setLabores(labs || []);
-  setFacturas(facts || []);
-  setInsumos(ins || []);
-  const remitosUnicos = (rems || []).reduce((acc: any[], r: any) => {
-    const key = `${r.numero_remito}-${r.fecha}`;
-    if (!acc.find((x: any) => `${x.numero_remito}-${x.fecha}` === key)) acc.push(r);
-    return acc;
+    Promise.all([
+      supabase.from("actividades").select(),
+      supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social"),
+      supabase.from("labores").select(),
+      supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
+      supabase.from("insumos").select().order("nombre"),
+      supabase.from("remitos").select("id, numero, numero_remito, fecha, proveedor_id, proveedores(razon_social), stock_movimientos(insumo_id, cantidad, insumos(nombre))").is("factura_id", null).order("created_at", { ascending: false }),
+    ]).then(([{ data: acts }, { data: provs }, { data: labs }, { data: facts }, { data: ins }, { data: rems }]) => {
+      setActividades(acts || []);
+      setProveedores(provs || []);
+      setLabores(labs || []);
+      setFacturas(facts || []);
+      setInsumos(ins || []);
+      setRemitos(rems || []);
+    });
   }, []);
-  setRemitos(remitosUnicos);
-});
-}, []); 
+
   const obtenerDolarPorFecha = async (fecha: string) => {
     try {
       const res = await fetch("https://api.bluelytics.com.ar/v2/evolution.json");
@@ -112,17 +108,17 @@ Promise.all([
       setConcepto(data.Concepto || "");
       setTipo(data.Tipo || "");
       setTipoComprobante(data.tipo_comprobante || "");
-      setPagador(data.Pagador || "");
       const monedaFactura = data.moneda || "ARS";
-setMoneda(monedaFactura);
-setMontoIngresado(
-  monedaFactura === "USD"
-    ? (data.monto_neto / (data.dolar || 1)).toFixed(2)
-    : data.monto_neto?.toString() || ""
-);
+      setMoneda(monedaFactura);
+      setMontoIngresado(
+        monedaFactura === "USD"
+          ? (data.monto_neto / (data.dolar || 1)).toFixed(2)
+          : data.monto_neto?.toString() || ""
+      );
       setAlicuotaIva(data.alicuota_iva?.toString() || "21");
-      setPercepciones(data.percepciones || "");
-      setRetenciones(data.retenciones || "");
+      setPercepciones(data.percepciones?.toString() || "");
+      setRetenciones(data.retenciones?.toString() || "");
+      setNoGravado(data.no_gravado?.toString() || "");
       setFacturaOriginalId(data.factura_original_id || "");
       setActividad(data.Actividad_id || "");
       setLabor(data.Labor_id || "");
@@ -190,13 +186,13 @@ setMontoIngresado(
       Concepto: concepto,
       Tipo: tipo,
       tipo_comprobante: tipoComprobante,
-      
       Monto: montoTotal,
       monto_neto: montoNeto,
       alicuota_iva: Number(alicuotaIva),
       monto_iva: montoIva,
       percepciones: Number(percepciones || 0),
       retenciones: Number(retenciones || 0),
+      no_gravado: Number(noGravado || 0),
       monto_usd: montoEnUSD,
       dolar: dolar,
       moneda: moneda,
@@ -204,7 +200,6 @@ setMontoIngresado(
       Labor_id: labor || null,
       factura_original_id: facturaOriginalId || null,
       pdf_url: urlPdf || null,
-      
     };
 
     let facturaId = id;
@@ -220,11 +215,12 @@ setMontoIngresado(
     }
 
     if (error) { alert(error.message); return; }
-    // Vincular remito a la factura
-if (remito && facturaId) {
-  await supabase.from("remitos").update({ factura_id: facturaId }).eq("id", remito);
-  await supabase.from("stock_movimientos").update({ factura_id: facturaId }).eq("remito_id", remito);
-}
+
+    if (remito && facturaId) {
+      await supabase.from("remitos").update({ factura_id: facturaId }).eq("id", remito);
+      await supabase.from("stock_movimientos").update({ factura_id: facturaId }).eq("remito_id", remito);
+    }
+
     if (facturaId && items.length > 0) {
       await supabase.from("factura_items").delete().eq("factura_id", facturaId);
       const itemsParaGuardar = items
@@ -251,9 +247,9 @@ if (remito && facturaId) {
 
     alert(`✅ Total ARS $${montoTotal.toLocaleString("es-AR")} | USD ${montoEnUSD.toFixed(2)}`);
     setFecha(""); setFechaVto(""); setProveedorId(""); setNumeroFactura(""); setConcepto("");
-    setTipo(""); setTipoComprobante(""); setPagador(""); setMontoIngresado(""); setAlicuotaIva("21");
-    setPercepciones(""); setRetenciones(""); setFacturaOriginalId("");
-    setActividad(""); setLabor(""); setDolar(null); setPdfFile(null); setPdfUrl(null);
+    setTipo(""); setTipoComprobante(""); setMontoIngresado(""); setAlicuotaIva("21");
+    setPercepciones(""); setRetenciones(""); setNoGravado(""); setFacturaOriginalId("");
+    setActividad(""); setLabor(""); setRemito(""); setDolar(null); setPdfFile(null); setPdfUrl(null);
     setItems([]); setBusquedaItems({}); setMostrarDropdown({});
   };
 
@@ -312,7 +308,7 @@ if (remito && facturaId) {
             <textarea value={concepto} onChange={(e) => setConcepto(e.target.value)} style={{ ...input, height: 80, resize: "vertical" }} placeholder="Describí los productos o servicios..." />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
             <div>
               <div style={lbl}>CATEGORÍA</div>
               <select value={tipo} onChange={(e) => setTipo(e.target.value)} style={input}>
@@ -320,7 +316,6 @@ if (remito && facturaId) {
                 <option>Insumos</option><option>Servicios</option><option>Combustible</option>
               </select>
             </div>
-            
             <div>
               <div style={lbl}>ACTIVIDAD</div>
               <select value={actividad} onChange={(e) => setActividad(e.target.value)} style={input}>
@@ -345,8 +340,6 @@ if (remito && facturaId) {
 
             {items.map((item, index) => (
               <div key={index} style={{ border: "1px solid #f0f0f0", borderRadius: 10, padding: 16, marginBottom: 12 }}>
-
-                {/* BUSCADOR DE PRODUCTO */}
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ ...lbl, marginBottom: 4 }}>PRODUCTO</div>
                   <div style={{ position: "relative" }}>
@@ -362,7 +355,7 @@ if (remito && facturaId) {
                       }}
                       onFocus={() => setMostrarDropdown(prev => ({ ...prev, [index]: true }))}
                       onBlur={() => setTimeout(() => setMostrarDropdown(prev => ({ ...prev, [index]: false })), 200)}
-                      placeholder="Escribí para buscar... (ej: Glifosato, DK72...)"
+                      placeholder="Escribí para buscar..."
                       style={input}
                     />
                     {mostrarDropdown[index] && (
@@ -370,21 +363,16 @@ if (remito && facturaId) {
                         {insumos
                           .filter(i => i.nombre.toLowerCase().includes((busquedaItems[index] || "").toLowerCase()))
                           .map(i => (
-                            <div
-                              key={i.id}
-                              onMouseDown={() => seleccionarInsumo(index, i)}
+                            <div key={i.id} onMouseDown={() => seleccionarInsumo(index, i)}
                               style={{ padding: "10px 14px", cursor: "pointer", fontSize: 14, borderBottom: "1px solid #f5f5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}
                               onMouseEnter={(e) => e.currentTarget.style.background = "#f0faf4"}
-                              onMouseLeave={(e) => e.currentTarget.style.background = "white"}
-                            >
+                              onMouseLeave={(e) => e.currentTarget.style.background = "white"}>
                               <span style={{ fontWeight: 500 }}>{i.nombre}</span>
                               <span style={{ color: "#888", fontSize: 12 }}>{i.unidad} — {i.categoria}</span>
                             </div>
                           ))}
                         {insumos.filter(i => i.nombre.toLowerCase().includes((busquedaItems[index] || "").toLowerCase())).length === 0 && (
-                          <div style={{ padding: "12px 14px", color: "#888", fontSize: 13 }}>
-                            No encontrado — podés agregarlo en <a href="/agricultura/remitos" style={{ color: "#0f1f17", fontWeight: 600 }}>Remitos → Nuevo insumo</a>
-                          </div>
+                          <div style={{ padding: "12px 14px", color: "#888", fontSize: 13 }}>No encontrado</div>
                         )}
                       </div>
                     )}
@@ -396,7 +384,6 @@ if (remito && facturaId) {
                   )}
                 </div>
 
-                {/* CANTIDAD, UNIDAD, PRECIO, DESCUENTO */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
                   <div>
                     <div style={{ ...lbl, marginBottom: 4 }}>CANTIDAD</div>
@@ -448,7 +435,7 @@ if (remito && facturaId) {
                 </select>
               </div>
               <div>
-                <div style={lbl}>MONTO NETO {moneda === "USD" ? "EN USD *" : "*"}</div>
+                <div style={lbl}>MONTO NETO GRAVADO {moneda === "USD" ? "EN USD *" : "*"}</div>
                 <input type="number" value={montoIngresado} onChange={(e) => setMontoIngresado(e.target.value)} style={input} placeholder="0.00" />
               </div>
               <div>
@@ -457,7 +444,7 @@ if (remito && facturaId) {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 20, marginBottom: 16 }}>
               <div>
                 <div style={lbl}>ALÍCUOTA IVA</div>
                 <select value={alicuotaIva} onChange={(e) => setAlicuotaIva(e.target.value)} style={input}>
@@ -466,6 +453,10 @@ if (remito && facturaId) {
                   <option value="21">21%</option>
                   <option value="27">27%</option>
                 </select>
+              </div>
+              <div>
+                <div style={lbl}>NO GRAVADO</div>
+                <input type="number" value={noGravado} onChange={(e) => setNoGravado(e.target.value)} style={input} placeholder="0.00" />
               </div>
               <div>
                 <div style={lbl}>PERCEPCIONES</div>
@@ -480,8 +471,12 @@ if (remito && facturaId) {
             {montoIngresado && (
               <div style={{ background: "#f8f9fa", borderRadius: 8, padding: 16, fontSize: 13 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <div style={{ color: "#888" }}>Monto neto:</div>
+                  <div style={{ color: "#888" }}>Monto neto gravado:</div>
                   <div style={{ fontWeight: 600, textAlign: "right" }}>${montoNeto.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
+                  {Number(noGravado) > 0 && <>
+                    <div style={{ color: "#888" }}>No gravado:</div>
+                    <div style={{ fontWeight: 600, textAlign: "right" }}>${Number(noGravado).toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
+                  </>}
                   <div style={{ color: "#888" }}>IVA ({alicuotaIva}%):</div>
                   <div style={{ fontWeight: 600, textAlign: "right" }}>${montoIva.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
                   {Number(percepciones) > 0 && <>
@@ -495,81 +490,76 @@ if (remito && facturaId) {
                   <div style={{ borderTop: "1px solid #ddd", paddingTop: 8, fontWeight: 700 }}>TOTAL ARS:</div>
                   <div style={{ borderTop: "1px solid #ddd", paddingTop: 8, fontWeight: 800, textAlign: "right", fontSize: 15 }}>${montoTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
                   {dolar && <>
-                    <div style={{ color: "#888" }}>Neto {moneda}:</div>
-                    <div style={{ fontWeight: 600, textAlign: "right" }}>{moneda === "USD" ? `USD ${montoNetoPuro.toFixed(2)}` : `$${montoNeto.toLocaleString("es-AR", { maximumFractionDigits: 2 })}`}</div>
-                    <div style={{ color: "#888" }}>IVA ({alicuotaIva}%) {moneda}:</div>
-                    <div style={{ fontWeight: 600, textAlign: "right" }}>{moneda === "USD" ? `USD ${montoIvaPuro.toFixed(2)}` : `$${montoIva.toLocaleString("es-AR", { maximumFractionDigits: 2 })}`}</div>
-                    <div style={{ fontWeight: 700 }}>TOTAL {moneda}:</div>
-                    <div style={{ fontWeight: 800, textAlign: "right", fontSize: 15 }}>{moneda === "USD" ? `USD ${montoTotalPuro.toFixed(2)}` : `$${montoTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}`}</div>
+                    <div style={{ color: "#888" }}>USD:</div>
+                    <div style={{ fontWeight: 600, textAlign: "right" }}>USD {montoEnUSD.toFixed(2)}</div>
                   </>}
                 </div>
               </div>
             )}
           </div>
 
-  <div style={section}>
-  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
-    {tipo === "Insumos" ? "📦 Remito asociado" : "🚜 Labor asociada"}
-  </div>
+          <div style={section}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+              {tipo === "Insumos" ? "📦 Remito asociado" : "🚜 Labor asociada"}
+            </div>
 
-  {tipo === "Insumos" ? (
-    <>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
-  <div>
-    <div style={lbl}>FILTRAR POR PROVEEDOR</div>
-    <select value={filtroProveedorRemito} onChange={(e) => { setFiltroProveedorRemito(e.target.value); setRemito(""); }} style={input}>
-      <option value="">Todos los proveedores</option>
-      {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
-    </select>
-  </div>
-  <div>
-    <div style={lbl}>SELECCIONAR REMITO</div>
-    <select value={remito} onChange={(e) => setRemito(e.target.value)} style={input}>
-      <option value="">Sin asociar</option>
-      {remitos
-        .filter(r => !filtroProveedorRemito || r.proveedor_id === filtroProveedorRemito)
-        .map((r, i) => (
-  <option key={i} value={r.id}>
-R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.fecha} — {r.proveedores?.razon_social || "Sin proveedor"} — {(r.stock_movimientos || []).map((m: any) => m.insumos?.nombre).filter(Boolean).join(", ")}
-  </option>
-))}
-    </select>
-  </div>
-</div>
-    </>
-  ) : (
-    <>
-      <div style={lbl}>SELECCIONAR LABOR</div>
-      <select value={labor} onChange={(e) => setLabor(e.target.value)} style={input}>
-        <option value="">Sin asociar</option>
-        {labores.map((l) => {
-  const costoLabor = l.Costo_total || 0;
-  const coincide = montoNeto > 0 && Math.abs(costoLabor - montoNeto) < 1;
-  const nroLabor = l.numero ? `L-${String(l.numero).padStart(3, "0")}` : "";
-  return (
-    <option key={l.id} value={l.id} disabled={montoNeto > 0 && !coincide}>
-      {nroLabor} — {l.Tipo} — {l.Fecha} — ${Number(l.Costo_total || 0).toLocaleString("es-AR")}
-      {montoNeto > 0 && coincide ? " ✅" : montoNeto > 0 ? " ❌ monto no coincide" : ""}
-    </option>
-  );
-})}
-      </select>
-      {labor && montoNeto > 0 && (() => {
-        const laborSel = labores.find(l => l.id === labor);
-        const coincide = laborSel && Math.abs((laborSel.Costo_total || 0) - montoNeto) < 1;
-        return coincide ? (
-          <div style={{ marginTop: 8, fontSize: 12, color: "#2e7d32", background: "#e8f5e9", padding: "6px 12px", borderRadius: 6 }}>
-            ✅ El monto coincide con el costo del labor
+            {tipo === "Insumos" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <div style={lbl}>FILTRAR POR PROVEEDOR</div>
+                  <select value={filtroProveedorRemito} onChange={(e) => { setFiltroProveedorRemito(e.target.value); setRemito(""); }} style={input}>
+                    <option value="">Todos los proveedores</option>
+                    {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={lbl}>SELECCIONAR REMITO</div>
+                  <select value={remito} onChange={(e) => setRemito(e.target.value)} style={input}>
+                    <option value="">Sin asociar</option>
+                    {remitos
+                      .filter(r => !filtroProveedorRemito || r.proveedor_id === filtroProveedorRemito)
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.fecha} — {r.proveedores?.razon_social || "Sin proveedor"} — {(r.stock_movimientos || []).map((m: any) => m.insumos?.nombre).filter(Boolean).join(", ")}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={lbl}>SELECCIONAR LABOR</div>
+                <select value={labor} onChange={(e) => setLabor(e.target.value)} style={input}>
+                  <option value="">Sin asociar</option>
+                  {labores.map((l) => {
+                    const costoLabor = l.Costo_total || 0;
+                    const coincide = montoNeto > 0 && Math.abs(costoLabor - montoNeto) < 1;
+                    const nroLabor = l.numero ? `L-${String(l.numero).padStart(3, "0")}` : "";
+                    return (
+                      <option key={l.id} value={l.id} disabled={montoNeto > 0 && !coincide}>
+                        {nroLabor} — {l.Tipo} — {l.Fecha} — ${Number(l.Costo_total || 0).toLocaleString("es-AR")}
+                        {montoNeto > 0 && coincide ? " ✅" : montoNeto > 0 ? " ❌ monto no coincide" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                {labor && montoNeto > 0 && (() => {
+                  const laborSel = labores.find(l => l.id === labor);
+                  const coincide = laborSel && Math.abs((laborSel.Costo_total || 0) - montoNeto) < 1;
+                  return coincide ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#2e7d32", background: "#e8f5e9", padding: "6px 12px", borderRadius: 6 }}>
+                      ✅ El monto coincide con el costo del labor
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#c62828", background: "#ffebee", padding: "6px 12px", borderRadius: 6 }}>
+                      ⚠️ El monto no coincide — Labor: ${Number(laborSel?.Costo_total || 0).toLocaleString("es-AR")} / Factura (neto): ${montoNeto.toLocaleString("es-AR")}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
           </div>
-        ) : (
-          <div style={{ marginTop: 8, fontSize: 12, color: "#c62828", background: "#ffebee", padding: "6px 12px", borderRadius: 6 }}>
-            ⚠️ El monto no coincide — Labor: ${Number(laborSel?.Costo_total || 0).toLocaleString("es-AR")} / Factura (neto): ${montoNeto.toLocaleString("es-AR")}
-          </div>
-        );
-      })()}
-    </>
-  )}
-</div>
+
           <div style={section}>
             <div style={lbl}>ADJUNTAR PDF</div>
             <div style={{ marginTop: 8 }}>
@@ -623,8 +613,12 @@ R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>📊 Resumen</div>
-            <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>NETO</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>NETO GRAVADO</div>
             <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>${montoNeto.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
+            {Number(noGravado) > 0 && <>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>NO GRAVADO</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>${Number(noGravado).toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
+            </>}
             <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>IVA</div>
             <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>${montoIva.toLocaleString("es-AR", { maximumFractionDigits: 2 })}</div>
             <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>TOTAL ARS</div>
@@ -653,7 +647,6 @@ R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.
     </div>
   );
 }
-
 
 export default function Page() {
   return (
