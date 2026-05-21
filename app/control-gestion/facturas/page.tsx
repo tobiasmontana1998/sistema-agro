@@ -55,14 +55,13 @@ function CargarFacturaInner() {
 
   const esNotaCredito = tipoComprobante.includes("Nota de Crédito");
 
+const montoNetoPuro = Number(montoIngresado) || 0;
+const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
+const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
+const montoNeto = moneda === "USD" ? montoNetoPuro * (dolar || 1) : montoNetoPuro;
+const montoIva = moneda === "USD" ? montoIvaPuro * (dolar || 1) : montoIvaPuro;
+const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
 const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dolar : 0);
-  const montoNetoPuro = Number(montoIngresado) || 0;
-  const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
-  const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
-  const montoNeto = moneda === "USD" ? montoNetoPuro * (dolar || 1) : montoNetoPuro;
-  const montoIva = moneda === "USD" ? montoIvaPuro * (dolar || 1) : montoIvaPuro;
-  const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
-
   useEffect(() => {
     Promise.all([
       supabase.from("actividades").select(),
