@@ -19,6 +19,7 @@ const navItems = [
       { href: "/control-gestion/facturas", label: "Cargar Gasto", icon: "➕" },
       { href: "/control-gestion/proveedores", label: "Proveedores", icon: "🏢" },
       { href: "/control-gestion/liquidaciones", label: "Liquidaciones", icon: "🌾" },
+      { href: "/control-gestion/aportes", label: "Aportes", icon: "💰" },
     ],
   },
   {

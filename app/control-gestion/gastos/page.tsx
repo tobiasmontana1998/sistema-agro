@@ -1,6 +1,5 @@
 "use client";
 
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { useEffect, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
@@ -18,7 +17,6 @@ export default function Gastos() {
   const [orden, setOrden] = useState("fecha");
   const [filtroRemito, setFiltroRemito] = useState("todos");
   const [modalPago, setModalPago] = useState<any>(null);
-  const [pagadorModal, setPagadorModal] = useState("OC");
   const [montoModal, setMontoModal] = useState("");
   const [fechaModal, setFechaModal] = useState(new Date().toISOString().split("T")[0]);
 
@@ -27,7 +25,7 @@ export default function Gastos() {
   const cargarDatos = async () => {
     const [{ data: facturas }, { data: pagosData }, { data: remitosData }, { data: items }] = await Promise.all([
       supabase.from("facturas").select(`
-        id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, Pagador, pdf_url,
+        id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, pdf_url,
         Monto, monto_usd, dolar, pagada, moneda, proveedor_id,
         tipo_comprobante, monto_neto, monto_iva, percepciones, retenciones,
         proveedores!fk_facturas_proveedor (razon_social, cuit),
@@ -48,16 +46,13 @@ export default function Gastos() {
   const getEstadoRemito = (facturaId: string) => {
     const itemsFactura = itemsData.filter((i: any) => i.factura_id === facturaId);
     const algunoRemitido = remitos.some(r => r.factura_id === facturaId);
-
     if (itemsFactura.length === 0) return algunoRemitido ? "vinculado" : "sin_remito";
-
     const todosCompletos = itemsFactura.every((item: any) => {
       const remitido = remitos
         .filter(r => r.factura_id === facturaId && r.insumo_id === item.insumo_id)
         .reduce((acc: number, r: any) => acc + Number(r.cantidad), 0);
       return remitido >= Number(item.cantidad);
     });
-
     if (todosCompletos) return "vinculado";
     if (algunoRemitido) return "parcial";
     return "sin_remito";
@@ -84,10 +79,10 @@ export default function Gastos() {
   };
 
   const exportarCSV = () => {
-    const encabezado = ["Fecha emisión", "Fecha vencimiento", "Proveedor", "Factura", "Concepto", "Tipo", "Pagador", "Actividad", "Monto ARS", "Monto USD", "Dólar", "PDF"];
+    const encabezado = ["Fecha emisión", "Fecha vencimiento", "Proveedor", "Factura", "Concepto", "Tipo", "Actividad", "Monto ARS", "Monto USD", "Dólar", "PDF"];
     const filas = gastos.map((g) => [
       g.Fecha, g.Fecha_vencimiento, g.proveedores?.razon_social, g.Numero_factura,
-      g.Concepto, g.Tipo, g.Pagador, g.actividades?.nombre || "",
+      g.Concepto, g.Tipo, g.actividades?.nombre || "",
       Number(g.Monto).toFixed(2), Number(g.monto_usd).toFixed(2), Number(g.dolar).toFixed(2), g.pdf_url || "",
     ]);
     const csv = [encabezado, ...filas].map((f) => f.join(";")).join("\n");
@@ -105,40 +100,80 @@ export default function Gastos() {
       "Recibo": "004",
     };
     const monedaMap: Record<string, string> = { "ARS": "PES", "USD": "DOL" };
+    const alicuotaMap: Record<string, string> = {
+      "0": "0003", "10.5": "0004", "21": "0005", "27": "0006",
+    };
 
-    const lineas = gastos
-      .filter(g => g.proveedores?.cuit && g.tipo_comprobante)
+    const pad = (val: string | number, len: number, right = false) => {
+      const s = String(val);
+      return right ? s.slice(0, len).padEnd(len, " ") : s.slice(0, len).padStart(len, "0");
+    };
+    const fmt = (val: number) => Math.round(val * 100).toString().padStart(15, "0");
+    const facturasFiltradas = gastos.filter(g => g.tipo_comprobante);
+
+    const lineasCbte = facturasFiltradas.map(g => {
+      const fecha = (g.Fecha || "").replace(/-/g, "");
+      const tipoComp = tipoComprobanteMap[g.tipo_comprobante] || "001";
+      const partes = (g.Numero_factura || "0000-00000000").split("-");
+      const puntoVenta = pad(partes[0] || "0", 5);
+      const nroComp = pad(partes[1] || "0", 20);
+      const despacho = pad("", 16);
+      const codDoc = "80";
+      const cuit = pad((g.proveedores?.cuit || "").replace(/-/g, ""), 20);
+      const razonSocial = pad(g.proveedores?.razon_social || "", 30, true);
+      const total = fmt(Number(g.Monto || 0));
+      const noGravado = fmt(0);
+      const exentas = fmt(Number(g.alicuota_iva) === 0 ? Number(g.monto_neto || 0) : 0);
+      const percIVA = fmt(Number(g.percepciones || 0));
+      const percOtros = fmt(0);
+      const percIIBB = fmt(0);
+      const percMunic = fmt(0);
+      const impInternos = fmt(0);
+      const moneda = monedaMap[g.moneda] || "PES";
+      const tipoCambio = g.moneda === "USD"
+        ? Math.round(Number(g.dolar) * 1000000).toString().padStart(10, "0")
+        : "0001000000";
+      const cantAlicuotas = Number(g.alicuota_iva) === 0 ? "0" : "1";
+      const codOperacion = " ";
+      const creditoFiscal = fmt(Number(g.monto_iva || 0));
+      const otrosTributos = fmt(Number(g.retenciones || 0));
+      const cuitCorredor = pad("0", 11);
+      const denomCorredor = pad("", 30, true);
+      const ivaComision = fmt(0);
+      return [fecha, tipoComp, puntoVenta, nroComp, despacho, codDoc, cuit, razonSocial,
+        total, noGravado, exentas, percIVA, percOtros, percIIBB, percMunic, impInternos,
+        moneda, tipoCambio, cantAlicuotas, codOperacion,
+        creditoFiscal, otrosTributos, cuitCorredor, denomCorredor, ivaComision].join("");
+    });
+
+    const lineasAlicuotas = facturasFiltradas
+      .filter(g => Number(g.alicuota_iva) > 0)
       .map(g => {
-        const fecha = g.Fecha?.replace(/-/g, "");
         const tipoComp = tipoComprobanteMap[g.tipo_comprobante] || "001";
         const partes = (g.Numero_factura || "0000-00000000").split("-");
-        const puntoVenta = (partes[0] || "0000").padStart(5, "0");
-        const nroComp = (partes[1] || "00000000").padStart(8, "0");
-        const cuitSinGuiones = (g.proveedores?.cuit || "").replace(/-/g, "");
-        const moneda = monedaMap[g.moneda] || "PES";
-        const tipoCambio = g.moneda === "USD" ? Number(g.dolar).toFixed(6) : "1.000000";
-        const alicuota = Number(g.alicuota_iva || 21);
-
-        return [
-          fecha, tipoComp, puntoVenta, nroComp, "",
-          "80", cuitSinGuiones, g.proveedores?.razon_social || "",
-          Number(g.Monto).toFixed(2), "0.00",
-          alicuota === 0 ? Number(g.monto_neto || 0).toFixed(2) : "0.00",
-          "0.00", "0.00",
-          Number(g.percepciones || 0).toFixed(2),
-          "0.00", "0.00",
-          moneda, tipoCambio, "1", "",
-          Number(g.monto_iva || 0).toFixed(2),
-          Number(g.retenciones || 0).toFixed(2),
-          "", "", "0.00",
-        ].join(",");
+        const puntoVenta = pad(partes[0] || "0", 5);
+        const nroComp = pad(partes[1] || "0", 20);
+        const codDoc = "80";
+        const cuit = pad((g.proveedores?.cuit || "").replace(/-/g, ""), 20);
+        const neto = fmt(Number(g.monto_neto || 0));
+        const alicuota = alicuotaMap[String(g.alicuota_iva || "21")] || "0005";
+        const ivaLiquidado = fmt(Number(g.monto_iva || 0));
+        return [tipoComp, puntoVenta, nroComp, codDoc, cuit, neto, alicuota, ivaLiquidado].join("");
       });
 
-    const blob = new Blob([lineas.join("\n")], { type: "text/plain;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `IVA_Compras_${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
+    const fecha = new Date().toISOString().slice(0, 10);
+    const blobCbte = new Blob([lineasCbte.join("\n")], { type: "text/plain;charset=utf-8;" });
+    const aCbte = document.createElement("a");
+    aCbte.href = URL.createObjectURL(blobCbte);
+    aCbte.download = `LIBRO_IVA_DIGITAL_COMPRAS_CBTE_${fecha}.txt`;
+    aCbte.click();
+    setTimeout(() => {
+      const blobAlic = new Blob([lineasAlicuotas.join("\n")], { type: "text/plain;charset=utf-8;" });
+      const aAlic = document.createElement("a");
+      aAlic.href = URL.createObjectURL(blobAlic);
+      aAlic.download = `LIBRO_IVA_DIGITAL_COMPRAS_ALICUOTAS_${fecha}.txt`;
+      aAlic.click();
+    }, 500);
   };
 
   const esUSD = (g: any) => g.moneda === "USD";
@@ -147,14 +182,13 @@ export default function Gastos() {
     setModalPago(g);
     const montoDefault = esUSD(g) ? Number(g.monto_usd).toFixed(2) : Number(g.Monto).toFixed(2);
     setMontoModal(montoDefault);
-    setPagadorModal("OC");
     setFechaModal(new Date().toISOString().split("T")[0]);
   };
 
   const guardarPago = async () => {
-    if (!montoModal || !pagadorModal) return;
+    if (!montoModal) return;
     const montoEnARS = esUSD(modalPago) ? Number(montoModal) * (modalPago.dolar || 1) : Number(montoModal);
-    const { error } = await supabase.from("pagos_facturas").insert([{ factura_id: modalPago.id, pagador: pagadorModal, monto: montoEnARS, fecha: fechaModal }]);
+    const { error } = await supabase.from("pagos_facturas").insert([{ factura_id: modalPago.id, monto: montoEnARS, fecha: fechaModal }]);
     if (error) { alert("Error: " + error.message); return; }
     const pagosFactura = [...pagos.filter(p => p.factura_id === modalPago.id), { monto: montoEnARS }];
     const totalPagado = pagosFactura.reduce((acc, p) => acc + Number(p.monto), 0);
@@ -166,8 +200,7 @@ export default function Gastos() {
   };
 
   const getPagosFactura = (facturaId: string) => pagos.filter(p => p.factura_id === facturaId);
-  const getTotalPagadoCT = (facturaId: string) => getPagosFactura(facturaId).filter(p => p.pagador === "CT").reduce((acc, p) => acc + Number(p.monto), 0);
-  const getTotalPagadoOC = (facturaId: string) => getPagosFactura(facturaId).filter(p => p.pagador === "OC").reduce((acc, p) => acc + Number(p.monto), 0);
+  const getTotalPagado = (facturaId: string) => getPagosFactura(facturaId).reduce((acc, p) => acc + Number(p.monto), 0);
 
   const gastosFiltrados = gastos
     .filter((g) => {
@@ -183,17 +216,7 @@ export default function Gastos() {
     .sort((a, b) => orden === "monto" ? b.Monto - a.Monto : new Date(b.Fecha).getTime() - new Date(a.Fecha).getTime());
 
   const totalGastado = gastos.reduce((acc, g) => acc + (g.Monto || 0), 0);
-  const totalPagadoCT = pagos.filter(p => p.pagador === "CT").reduce((acc, p) => acc + Number(p.monto), 0);
-  const totalPagadoOC = pagos.filter(p => p.pagador === "OC").reduce((acc, p) => acc + Number(p.monto), 0);
-  const totalPagado = totalPagadoCT + totalPagadoOC;
-  const pctCT = totalPagado > 0 ? ((totalPagadoCT / totalPagado) * 100).toFixed(1) : "0";
-  const pctOC = totalPagado > 0 ? ((totalPagadoOC / totalPagado) * 100).toFixed(1) : "0";
-  const diferenciaOC = totalPagadoOC - totalPagado * 0.8;
-  const diferenciaCT = totalPagadoCT - totalPagado * 0.2;
   const sinRemitoCount = gastos.filter(g => g.Tipo === "Insumos" && getEstadoRemito(g.id) === "sin_remito").length;
-
-  const dataPie = [{ name: "CT", value: totalPagadoCT }, { name: "OC", value: totalPagadoOC }];
-  const COLORS = ["#f5c542", "#0f1f17"];
 
   const facturasPendientes = gastos
     .filter((g) => g.pagada === false && g.Fecha_vencimiento)
@@ -204,7 +227,8 @@ export default function Gastos() {
   const td: React.CSSProperties = { padding: "11px 14px", fontSize: 13 };
 
   return (
-<div style={{ maxWidth: 1500, margin: "0 auto", overflowX: "auto" }}>
+    <div style={{ maxWidth: 1500, margin: "0 auto", overflowX: "auto" }}>
+
       {/* MODAL PAGO */}
       {modalPago && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -222,10 +246,7 @@ export default function Gastos() {
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>Pagos registrados:</div>
                 {getPagosFactura(modalPago.id).map((p) => (
                   <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, padding: "4px 0", borderBottom: "1px solid #eee" }}>
-                    <div>
-                      <span style={{ color: p.pagador === "OC" ? "#0f1f17" : "#f59f00", fontWeight: 700 }}>{p.pagador}</span>
-                      <span style={{ color: "#888", marginLeft: 8, fontSize: 12 }}>{p.fecha}</span>
-                    </div>
+                    <span style={{ color: "#888", fontSize: 12 }}>{p.fecha}</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontWeight: 600 }}>{esUSD(modalPago) ? `USD ${(Number(p.monto) / (modalPago.dolar || 1)).toFixed(2)}` : `$${Number(p.monto).toLocaleString("es-AR")}`}</span>
                       <button onClick={() => eliminarPago(p.id, modalPago.id)} style={{ background: "#fee", border: "1px solid #fcc", color: "red", padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑</button>
@@ -234,24 +255,14 @@ export default function Gastos() {
                 ))}
                 <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, marginTop: 8 }}>
                   <span>Saldo pendiente:</span>
-                  <span>{esUSD(modalPago) ? `USD ${((modalPago.Monto - getTotalPagadoCT(modalPago.id) - getTotalPagadoOC(modalPago.id)) / (modalPago.dolar || 1)).toFixed(2)}` : `$${(modalPago.Monto - getTotalPagadoCT(modalPago.id) - getTotalPagadoOC(modalPago.id)).toLocaleString("es-AR")}`}</span>
+                  <span>{esUSD(modalPago) ? `USD ${((modalPago.Monto - getTotalPagado(modalPago.id)) / (modalPago.dolar || 1)).toFixed(2)}` : `$${(modalPago.Monto - getTotalPagado(modalPago.id)).toLocaleString("es-AR")}`}</span>
                 </div>
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>PAGADOR</div>
-                <select value={pagadorModal} onChange={(e) => setPagadorModal(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14 }}>
-                  <option value="OC">OC</option>
-                  <option value="CT">CT</option>
-                  <option value="Sociedad">Sociedad</option>
-                </select>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>MONTO {esUSD(modalPago) ? "(USD)" : "(ARS)"}</div>
-                <input type="number" value={montoModal} onChange={(e) => setMontoModal(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, boxSizing: "border-box" }} />
-              </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6 }}>MONTO {esUSD(modalPago) ? "(USD)" : "(ARS)"}</div>
+              <input type="number" value={montoModal} onChange={(e) => setMontoModal(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, boxSizing: "border-box" }} />
             </div>
 
             <div style={{ marginBottom: 20 }}>
@@ -296,46 +307,16 @@ export default function Gastos() {
       )}
 
       {/* MÉTRICAS */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
         <div style={{ ...card, borderLeft: "4px solid #f5c542" }}>
           <div style={{ fontSize: 12, color: "#888", marginBottom: 8, fontWeight: 600 }}>TOTAL GASTADO</div>
           <div style={{ fontSize: 28, fontWeight: 800 }}>${totalGastado.toLocaleString("es-AR")}</div>
           <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>{gastos.length} facturas registradas</div>
         </div>
-
-        <div style={card}>
-          <div style={{ fontSize: 12, color: "#888", marginBottom: 12, fontWeight: 600 }}>BALANCE OC(80%) / CT(20%)</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div style={{ background: diferenciaOC >= 0 ? "#fff8e1" : "#e8f5e9", borderRadius: 8, padding: 10, textAlign: "center" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#888" }}>OC pagó</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#0f1f17" }}>{pctOC}%</div>
-              <div style={{ fontSize: 11, color: diferenciaOC >= 0 ? "#f59f00" : "#2e7d32" }}>
-                {diferenciaOC >= 0 ? `+$${diferenciaOC.toLocaleString("es-AR", { maximumFractionDigits: 0 })} de más` : `$${Math.abs(diferenciaOC).toLocaleString("es-AR", { maximumFractionDigits: 0 })} le falta`}
-              </div>
-            </div>
-            <div style={{ background: diferenciaCT >= 0 ? "#fff8e1" : "#e8f5e9", borderRadius: 8, padding: 10, textAlign: "center" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#888" }}>CT pagó</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#f59f00" }}>{pctCT}%</div>
-              <div style={{ fontSize: 11, color: diferenciaCT >= 0 ? "#f59f00" : "#2e7d32" }}>
-                {diferenciaCT >= 0 ? `+$${diferenciaCT.toLocaleString("es-AR", { maximumFractionDigits: 0 })} de más` : `$${Math.abs(diferenciaCT).toLocaleString("es-AR", { maximumFractionDigits: 0 })} le falta`}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={{ fontSize: 12, color: "#888", marginBottom: 8, fontWeight: 600 }}>DISTRIBUCIÓN</div>
-          <ResponsiveContainer width="100%" height={110}>
-            <PieChart>
-              <Pie data={dataPie} dataKey="value" outerRadius={50} innerRadius={28}>
-                {dataPie.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          <div style={{ display: "flex", gap: 16, fontSize: 13, marginTop: 4 }}>
-            <span><span style={{ color: "#f5c542", fontWeight: 700 }}>●</span> CT: {pctCT}%</span>
-            <span><span style={{ color: "#0f1f17", fontWeight: 700 }}>●</span> OC: {pctOC}%</span>
-          </div>
+        <div style={{ ...card, borderLeft: "4px solid #2e7d32" }}>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 8, fontWeight: 600 }}>FACTURAS PAGADAS</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>{gastos.filter(g => g.pagada).length}</div>
+          <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>{gastos.filter(g => !g.pagada).length} pendientes</div>
         </div>
       </div>
 
@@ -377,7 +358,7 @@ export default function Gastos() {
       </div>
 
       {/* TABLA */}
-<div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "auto" }}>
+      <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#f8f9fa", borderBottom: "2px solid #eee" }}>
@@ -389,7 +370,7 @@ export default function Gastos() {
               <th style={th}>TIPO</th>
               <th style={th}>REMITO</th>
               <th style={th}>PAGOS</th>
-              <th style={th}>PAGÓ</th>
+              <th style={th}>PAGADO</th>
               <th style={th}>MONTO</th>
               <th style={th}>USD</th>
               <th style={th}>PDF</th>
@@ -398,9 +379,7 @@ export default function Gastos() {
           </thead>
           <tbody>
             {gastosFiltrados.map((g) => {
-              const pagadoCT = getTotalPagadoCT(g.id);
-              const pagadoOC = getTotalPagadoOC(g.id);
-              const totalPagadoFactura = pagadoCT + pagadoOC;
+              const totalPagadoFactura = getTotalPagado(g.id);
               const saldo = g.Monto - totalPagadoFactura;
               const facturaUSD = esUSD(g);
               const esInsumo = g.Tipo === "Insumos";
@@ -439,8 +418,7 @@ export default function Gastos() {
                   </td>
                   <td style={td}>
                     <div style={{ fontSize: 12 }}>
-                      {pagadoCT > 0 && <div style={{ color: "#f59f00", fontWeight: 600 }}>CT: {facturaUSD ? `USD ${(pagadoCT / (g.dolar || 1)).toFixed(2)}` : `$${pagadoCT.toLocaleString("es-AR")}`}</div>}
-                      {pagadoOC > 0 && <div style={{ color: "#0f1f17", fontWeight: 600 }}>OC: {facturaUSD ? `USD ${(pagadoOC / (g.dolar || 1)).toFixed(2)}` : `$${pagadoOC.toLocaleString("es-AR")}`}</div>}
+                      {totalPagadoFactura > 0 && <div style={{ fontWeight: 600 }}>{facturaUSD ? `USD ${(totalPagadoFactura / (g.dolar || 1)).toFixed(2)}` : `$${totalPagadoFactura.toLocaleString("es-AR")}`}</div>}
                       {saldo > 0.01 && totalPagadoFactura > 0 && <div style={{ color: "#888" }}>Saldo: {facturaUSD ? `USD ${(saldo / (g.dolar || 1)).toFixed(2)}` : `$${saldo.toLocaleString("es-AR")}`}</div>}
                       {totalPagadoFactura === 0 && <span style={{ color: "#ccc" }}>—</span>}
                     </div>

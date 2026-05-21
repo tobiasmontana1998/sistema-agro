@@ -23,7 +23,6 @@ function CargarFacturaInner() {
   const [concepto, setConcepto] = useState("");
   const [tipoComprobante, setTipoComprobante] = useState("");
   const [tipo, setTipo] = useState("");
-  const [pagador, setPagador] = useState("");
   const [moneda, setMoneda] = useState("ARS");
   const [montoIngresado, setMontoIngresado] = useState("");
   const [alicuotaIva, setAlicuotaIva] = useState("21");
@@ -191,7 +190,7 @@ setMontoIngresado(
       Concepto: concepto,
       Tipo: tipo,
       tipo_comprobante: tipoComprobante,
-      Pagador: pagador,
+      
       Monto: montoTotal,
       monto_neto: montoNeto,
       alicuota_iva: Number(alicuotaIva),
@@ -321,13 +320,7 @@ if (remito && facturaId) {
                 <option>Insumos</option><option>Servicios</option><option>Combustible</option>
               </select>
             </div>
-            <div>
-              <div style={lbl}>PAGADOR</div>
-              <select value={pagador} onChange={(e) => setPagador(e.target.value)} style={input}>
-                <option value="">Seleccionar</option>
-                <option value="CT">CT</option><option value="OC">OC</option><option value="Sociedad">Sociedad</option>
-              </select>
-            </div>
+            
             <div>
               <div style={lbl}>ACTIVIDAD</div>
               <select value={actividad} onChange={(e) => setActividad(e.target.value)} style={input}>
