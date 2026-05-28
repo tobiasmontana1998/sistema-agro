@@ -53,19 +53,24 @@ function CargarFacturaInner() {
   const [busquedaItems, setBusquedaItems] = useState<Record<number, string>>({});
   const [mostrarDropdown, setMostrarDropdown] = useState<Record<number, boolean>>({});
 
+  // ARCA - CAE
+  const [cae, setCae] = useState("");
+  const [caeEstado, setCaeEstado] = useState<"idle" | "verificando" | "valido" | "invalido">("idle");
+
   const esNotaCredito = tipoComprobante.includes("Nota de Crédito");
 
-const montoNetoPuro = Number(montoIngresado) || 0;
-const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
-const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
-const montoNeto = moneda === "USD" ? montoNetoPuro * (dolar || 1) : montoNetoPuro;
-const montoIva = moneda === "USD" ? montoIvaPuro * (dolar || 1) : montoIvaPuro;
-const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
-const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dolar : 0);
+  const montoNetoPuro = Number(montoIngresado) || 0;
+  const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
+  const montoTotalPuro = montoNetoPuro + montoIvaPuro + Number(percepciones || 0) + Number(retenciones || 0) + Number(noGravado || 0);
+  const montoNeto = moneda === "USD" ? montoNetoPuro * (dolar || 1) : montoNetoPuro;
+  const montoIva = moneda === "USD" ? montoIvaPuro * (dolar || 1) : montoIvaPuro;
+  const montoTotal = moneda === "USD" ? montoTotalPuro * (dolar || 1) : montoTotalPuro;
+  const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dolar : 0);
+
   useEffect(() => {
     Promise.all([
       supabase.from("actividades").select(),
-      supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social"),
+      supabase.from("proveedores").select("id, razon_social, cuit").eq("activo", true).order("razon_social"),
       supabase.from("labores").select(),
       supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
       supabase.from("insumos").select().order("nombre"),
@@ -123,6 +128,8 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
       setLabor(data.Labor_id || "");
       setDolar(data.dolar || null);
       setPdfUrl(data.pdf_url || null);
+      setCae(data.cae || "");
+      setCaeEstado(data.cae ? "valido" : "idle");
     });
 
     supabase.from("factura_items").select("*").eq("factura_id", id).then(({ data }) => {
@@ -138,6 +145,57 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
       }
     });
   }, [id]);
+
+  const verificarCAE = async () => {
+  if (!cae) { alert("Ingresá el CAE"); return; }
+  if (!proveedorId) { alert("Seleccioná un proveedor primero"); return; }
+  if (!numeroFactura) { alert("Ingresá el número de comprobante primero"); return; }
+  if (!fecha) { alert("Ingresá la fecha primero"); return; }
+  if (!montoIngresado) { alert("Ingresá el monto primero"); return; }
+
+  setCaeEstado("verificando");
+  try {
+    const proveedor = proveedores.find(p => p.id === proveedorId);
+    
+    // Extraer punto de venta y número del formato 0002-00001981
+    const partes = numeroFactura.split('-');
+    const ptoVta = partes.length === 2 ? parseInt(partes[0]) : 1;
+    const nroComp = partes.length === 2 ? parseInt(partes[1]) : parseInt(numeroFactura);
+
+    // Tipo de comprobante
+    const tipoMap: Record<string, number> = {
+      'Factura A': 1, 'Factura B': 6, 'Factura C': 11,
+      'Nota de Crédito A': 3, 'Nota de Crédito B': 8, 'Nota de Crédito C': 13,
+    };
+    const tipoCbte = tipoMap[tipoComprobante] || 1;
+
+    // Fecha en formato YYYYMMDD
+    const fechaAFIP = fecha.replace(/-/g, '');
+
+    const res = await fetch("/api/arca/verificar-cae", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cae,
+        cuitEmisor: proveedor?.cuit,
+        tipoComprobante: tipoCbte,
+        ptoVta,
+        nroComprobante: nroComp,
+        fecha: fechaAFIP,
+        importe: montoTotal,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      setCaeEstado("invalido");
+      console.error("Error ARCA:", data.error);
+    } else {
+      setCaeEstado(data.valido ? "valido" : "invalido");
+    }
+  } catch {
+    setCaeEstado("invalido");
+  }
+};
 
   const agregarItem = () => setItems([...items, { descripcion: "", insumo_id: "", cantidad: "", unidad: "", precio_unitario: "", descuento: "0" }]);
   const quitarItem = (index: number) => setItems(items.filter((_, i) => i !== index));
@@ -199,6 +257,8 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
       Labor_id: labor || null,
       factura_original_id: facturaOriginalId || null,
       pdf_url: urlPdf || null,
+      cae: cae || null,
+      cae_valido: caeEstado === "valido",
     };
 
     let facturaId = id;
@@ -250,6 +310,7 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
     setPercepciones(""); setRetenciones(""); setNoGravado(""); setFacturaOriginalId("");
     setActividad(""); setLabor(""); setRemito(""); setDolar(null); setPdfFile(null); setPdfUrl(null);
     setItems([]); setBusquedaItems({}); setMostrarDropdown({});
+    setCae(""); setCaeEstado("idle");
   };
 
   const input: React.CSSProperties = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", marginTop: 6, fontSize: 14, boxSizing: "border-box" };
@@ -282,10 +343,50 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
             <div><div style={lbl}>VENCIMIENTO</div><input type="date" value={fechaVto} onChange={(e) => setFechaVto(e.target.value)} style={input} /></div>
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={lbl}>PROVEEDOR *</div>
-              <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)} style={input}>
+              <select value={proveedorId} onChange={(e) => { setProveedorId(e.target.value); setCaeEstado("idle"); }} style={input}>
                 <option value="">Seleccionar proveedor</option>
-                {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
+                {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}{p.cuit ? ` — ${p.cuit}` : ""}</option>)}
               </select>
+            </div>
+
+            {/* CAE - Verificación ARCA */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={lbl}>CAE (CÓDIGO DE AUTORIZACIÓN ELECTRÓNICA)</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <input
+                  value={cae}
+                  onChange={(e) => { setCae(e.target.value); setCaeEstado("idle"); }}
+                  style={{ ...input, marginTop: 0, flex: 1 }}
+                  placeholder="Ej: 71123456789012"
+                />
+                <button
+                  onClick={verificarCAE}
+                  disabled={caeEstado === "verificando" || !cae}
+                  style={{
+                    padding: "10px 16px",
+                    background: caeEstado === "verificando" || !cae ? "#ccc" : "#0f1f17",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: caeEstado === "verificando" || !cae ? "not-allowed" : "pointer",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {caeEstado === "verificando" ? "Verificando..." : "🔍 Verificar en ARCA"}
+                </button>
+              </div>
+              {caeEstado === "valido" && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#2e7d32", background: "#e8f5e9", padding: "6px 12px", borderRadius: 6 }}>
+                  ✅ CAE válido — verificado en ARCA
+                </div>
+              )}
+              {caeEstado === "invalido" && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#c62828", background: "#ffebee", padding: "6px 12px", borderRadius: 6 }}>
+                  ❌ CAE inválido o no encontrado en ARCA. Podés igualmente guardar la factura.
+                </div>
+              )}
             </div>
           </div>
 
@@ -629,6 +730,15 @@ const montoEnUSD = moneda === "USD" ? montoTotalPuro : (dolar ? montoTotal / dol
                 <div style={{ borderTop: "1px solid #f0f0f0", marginTop: 12, paddingTop: 12, fontSize: 12, color: "#888", marginBottom: 4 }}>TOTAL ÍTEMS</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "#0f1f17" }}>{moneda} {totalItems.toFixed(2)}</div>
               </>
+            )}
+            {/* Estado CAE en resumen */}
+            {cae && (
+              <div style={{ borderTop: "1px solid #f0f0f0", marginTop: 12, paddingTop: 12 }}>
+                <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>ESTADO CAE</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: caeEstado === "valido" ? "#2e7d32" : caeEstado === "invalido" ? "#c62828" : "#888" }}>
+                  {caeEstado === "valido" ? "✅ Verificado" : caeEstado === "invalido" ? "❌ Inválido" : "⏳ Sin verificar"}
+                </div>
+              </div>
             )}
           </div>
           {esNotaCredito && (

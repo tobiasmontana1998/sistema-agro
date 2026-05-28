@@ -28,6 +28,7 @@ export default function Gastos() {
         id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, pdf_url,
         Monto, monto_usd, dolar, pagada, moneda, proveedor_id,
         tipo_comprobante, monto_neto, monto_iva, percepciones, retenciones,
+        no_gravado, alicuota_iva,
         proveedores!fk_facturas_proveedor (razon_social, cuit),
         actividades!fk_facturas_actividad (nombre),
         labores!fk_facturas_labor (numero)
@@ -95,85 +96,214 @@ export default function Gastos() {
 
   const exportarIVAComprasTXT = () => {
     const tipoComprobanteMap: Record<string, string> = {
-      "Factura A": "001", "Factura B": "006", "Factura C": "011",
-      "Nota de Crédito A": "003", "Nota de Crédito B": "008", "Nota de Crédito C": "013",
-      "Recibo": "004",
+      "Factura A": "001",
+      "Factura B": "006",
+      "Factura C": "011",
+      "Nota de Crédito A": "003",
+      "Nota de Crédito B": "008",
+      "Nota de Crédito C": "013",
+      "Recibo": "015",
     };
-    const monedaMap: Record<string, string> = { "ARS": "PES", "USD": "DOL" };
+
     const alicuotaMap: Record<string, string> = {
-      "0": "0003", "10.5": "0004", "21": "0005", "27": "0006",
+      "0": "0003",
+      "10.5": "0004",
+      "21": "0005",
+      "27": "0006",
     };
 
-    const pad = (val: string | number, len: number, right = false) => {
-      const s = String(val);
-      return right ? s.slice(0, len).padEnd(len, " ") : s.slice(0, len).padStart(len, "0");
-    };
-    const fmt = (val: number) => Math.round(val * 100).toString().padStart(15, "0");
-    const facturasFiltradas = gastos.filter(g => g.tipo_comprobante);
+    // Helpers
+    const padN = (val: string | number, len: number) =>
+      String(val || "0").replace(/\D/g, "").padStart(len, "0").slice(-len);
 
-    const lineasCbte = facturasFiltradas.map(g => {
-      const fecha = (g.Fecha || "").replace(/-/g, "");
-      const tipoComp = tipoComprobanteMap[g.tipo_comprobante] || "001";
-      const partes = (g.Numero_factura || "0000-00000000").split("-");
-      const puntoVenta = pad(partes[0] || "0", 5);
-      const nroComp = pad(partes[1] || "0", 20);
-      const despacho = pad("", 16);
+    const padA = (val: string, len: number) =>
+      String(val || "").slice(0, len).padEnd(len, " ");
+
+    const fmt15 = (val: number) =>
+      Math.round((val || 0) * 100).toString().padStart(15, "0");
+
+    const facturasFiltradas = gastos.filter(
+      (g) => g.tipo_comprobante && tipoComprobanteMap[g.tipo_comprobante]
+    );
+
+    // ── ARCHIVO CBTE (325 caracteres por línea) ────────────────────────────
+    const lineasCbte = facturasFiltradas.map((g) => {
+      const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
+      const esFacturaBC = ["006", "008", "011", "013"].includes(tipoComp);
+
+      // Campo 1: Fecha (8) AAAAMMDD
+      const fecha = (g.Fecha || "").replace(/-/g, "").padStart(8, "0");
+
+      // Campo 2: Tipo comprobante (3)
+      // Campo 3: Punto de venta (5)
+      const partes = (g.Numero_factura || "00000-00000000").split("-");
+      const puntoVenta = padN(partes[0] || "0", 5);
+
+      // Campo 4: Número de comprobante (20)
+      const nroComp = padN(partes[1] || "0", 20);
+
+      // Campo 5: Despacho de importación (16) - blancos para compras normales
+      const despacho = " ".repeat(16);
+
+      // Campo 6: Código de documento del vendedor (2) - 80=CUIT
       const codDoc = "80";
-      const cuit = pad((g.proveedores?.cuit || "").replace(/-/g, ""), 20);
-      const razonSocial = pad(g.proveedores?.razon_social || "", 30, true);
-      const total = fmt(Number(g.Monto || 0));
-      const noGravado = fmt(0);
-      const exentas = fmt(Number(g.alicuota_iva) === 0 ? Number(g.monto_neto || 0) : 0);
-      const percIVA = fmt(Number(g.percepciones || 0));
-      const percOtros = fmt(0);
-      const percIIBB = fmt(0);
-      const percMunic = fmt(0);
-      const impInternos = fmt(0);
-      const moneda = monedaMap[g.moneda] || "PES";
+
+      // Campo 7: Número de identificación del vendedor (20)
+      const cuit = padN((g.proveedores?.cuit || "0").replace(/-/g, ""), 20);
+
+      // Campo 8: Apellido y nombre / denominación del vendedor (30)
+      const razonSocial = padA(g.proveedores?.razon_social || "", 30);
+
+      // Campo 9: Importe total de la operación (15)
+      const total = fmt15(Number(g.Monto || 0));
+
+      // Campo 10: Importe total conceptos que no integran precio neto gravado (15)
+      const noGravado = fmt15(Number(g.no_gravado || 0));
+
+      // Campo 11: Importe de operaciones exentas (15)
+      const exentas = fmt15(Number(g.alicuota_iva) === 0 ? Number(g.monto_neto || 0) : 0);
+
+      // Campo 12: Importe percepciones o pagos a cuenta del IVA (15)
+      const percIVA = fmt15(Number(g.percepciones || 0));
+
+      // Campo 13: Importe percepciones o pagos a cuenta de otros impuestos nacionales (15)
+      const percOtrosNac = fmt15(0);
+
+      // Campo 14: Importe percepciones de Ingresos Brutos (15)
+      const percIIBB = fmt15(0);
+
+      // Campo 15: Importe percepciones de Impuestos Municipales (15)
+      const percMunic = fmt15(0);
+
+      // Campo 16: Importe de Impuestos Internos (15)
+      const impInternos = fmt15(0);
+
+      // Campo 17: Código de moneda (3)
+      const moneda = g.moneda === "USD" ? "DOL" : "PES";
+
+      // Campo 18: Tipo de cambio (10) - 4 enteros 6 decimales sin punto
       const tipoCambio = g.moneda === "USD"
-        ? Math.round(Number(g.dolar) * 1000000).toString().padStart(10, "0")
+        ? Math.round(Number(g.dolar || 1) * 1000000).toString().padStart(10, "0")
         : "0001000000";
-      const cantAlicuotas = Number(g.alicuota_iva) === 0 ? "0" : "1";
+
+      // Campo 19: Cantidad de alícuotas de IVA (1)
+      // B y C: siempre 0. A exenta: 0. A con IVA: 1.
+      const cantAlicuotas = esFacturaBC || Number(g.alicuota_iva) === 0 ? "0" : "1";
+
+      // Campo 20: Código de operación (1) - espacio = no corresponde
       const codOperacion = " ";
-      const creditoFiscal = fmt(Number(g.monto_iva || 0));
-      const otrosTributos = fmt(Number(g.retenciones || 0));
-      const cuitCorredor = pad("0", 11);
-      const denomCorredor = pad("", 30, true);
-      const ivaComision = fmt(0);
-      return [fecha, tipoComp, puntoVenta, nroComp, despacho, codDoc, cuit, razonSocial,
-        total, noGravado, exentas, percIVA, percOtros, percIIBB, percMunic, impInternos,
-        moneda, tipoCambio, cantAlicuotas, codOperacion,
-        creditoFiscal, otrosTributos, cuitCorredor, denomCorredor, ivaComision].join("");
+
+      // Campo 21: Crédito Fiscal Computable (15) - sin prorrateo = igual al IVA
+      const creditoFiscal = fmt15(Number(g.monto_iva || 0));
+
+      // Campo 22: Otros Tributos (15)
+      const otrosTributos = fmt15(Number(g.retenciones || 0));
+
+      // Campo 23: CUIT emisor/corredor (11) - ceros si no hay corredor
+      const cuitCorredor = "00000000000";
+
+      // Campo 24: Denominación del emisor/corredor (30)
+      const denomCorredor = " ".repeat(30);
+
+      // Campo 25: IVA comisión (15)
+      const ivaComision = fmt15(0);
+
+      return [
+        fecha,         // 8
+        tipoComp,      // 3
+        puntoVenta,    // 5
+        nroComp,       // 20
+        despacho,      // 16
+        codDoc,        // 2
+        cuit,          // 20
+        razonSocial,   // 30
+        total,         // 15
+        noGravado,     // 15
+        exentas,       // 15
+        percIVA,       // 15
+        percOtrosNac,  // 15
+        percIIBB,      // 15
+        percMunic,     // 15
+        impInternos,   // 15
+        moneda,        // 3
+        tipoCambio,    // 10
+        cantAlicuotas, // 1
+        codOperacion,  // 1
+        creditoFiscal, // 15
+        otrosTributos, // 15
+        cuitCorredor,  // 11
+        denomCorredor, // 30
+        ivaComision,   // 15
+      ].join(""); // Total: 325
     });
 
+    // ── ARCHIVO ALICUOTAS (84 caracteres por línea) ───────────────────────
+    // Solo Facturas A con IVA > 0
     const lineasAlicuotas = facturasFiltradas
-      .filter(g => Number(g.alicuota_iva) > 0)
-      .map(g => {
-        const tipoComp = tipoComprobanteMap[g.tipo_comprobante] || "001";
-        const partes = (g.Numero_factura || "0000-00000000").split("-");
-        const puntoVenta = pad(partes[0] || "0", 5);
-        const nroComp = pad(partes[1] || "0", 20);
+      .filter((g) => {
+        const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
+        const esFacturaBC = ["006", "008", "011", "013"].includes(tipoComp);
+        return !esFacturaBC && Number(g.alicuota_iva) > 0;
+      })
+      .map((g) => {
+        const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
+        const partes = (g.Numero_factura || "00000-00000000").split("-");
+
+        // Campo 1: Tipo comprobante (3)
+        // Campo 2: Punto de venta (5)
+        const puntoVenta = padN(partes[0] || "0", 5);
+
+        // Campo 3: Número de comprobante (20)
+        const nroComp = padN(partes[1] || "0", 20);
+
+        // Campo 4: Código de documento del vendedor (2)
         const codDoc = "80";
-        const cuit = pad((g.proveedores?.cuit || "").replace(/-/g, ""), 20);
-        const neto = fmt(Number(g.monto_neto || 0));
+
+        // Campo 5: Número de identificación del vendedor (20)
+        const cuit = padN((g.proveedores?.cuit || "0").replace(/-/g, ""), 20);
+
+        // Campo 6: Importe neto gravado (15)
+        const neto = fmt15(Number(g.monto_neto || 0));
+
+        // Campo 7: Alícuota de IVA (4)
         const alicuota = alicuotaMap[String(g.alicuota_iva || "21")] || "0005";
-        const ivaLiquidado = fmt(Number(g.monto_iva || 0));
-        return [tipoComp, puntoVenta, nroComp, codDoc, cuit, neto, alicuota, ivaLiquidado].join("");
+
+        // Campo 8: Impuesto liquidado (15)
+        const ivaLiquidado = fmt15(Number(g.monto_iva || 0));
+
+        return [
+          tipoComp,    // 3
+          puntoVenta,  // 5
+          nroComp,     // 20
+          codDoc,      // 2
+          cuit,        // 20
+          neto,        // 15
+          alicuota,    // 4
+          ivaLiquidado,// 15
+        ].join(""); // Total: 84
       });
 
-    const fecha = new Date().toISOString().slice(0, 10);
-    const blobCbte = new Blob([lineasCbte.join("\n")], { type: "text/plain;charset=utf-8;" });
+    const fechaHoy = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+
+    // Descargar CBTE
+    const blobCbte = new Blob([lineasCbte.join("\r\n")], { type: "text/plain;charset=windows-1252;" });
     const aCbte = document.createElement("a");
     aCbte.href = URL.createObjectURL(blobCbte);
-    aCbte.download = `LIBRO_IVA_DIGITAL_COMPRAS_CBTE_${fecha}.txt`;
+    aCbte.download = `LIBRO_IVA_DIGITAL_COMPRAS_CBTE_${fechaHoy}.txt`;
+    document.body.appendChild(aCbte);
     aCbte.click();
+    document.body.removeChild(aCbte);
+
+    // Descargar ALICUOTAS
     setTimeout(() => {
-      const blobAlic = new Blob([lineasAlicuotas.join("\n")], { type: "text/plain;charset=utf-8;" });
+      const blobAlic = new Blob([lineasAlicuotas.join("\r\n")], { type: "text/plain;charset=windows-1252;" });
       const aAlic = document.createElement("a");
       aAlic.href = URL.createObjectURL(blobAlic);
-      aAlic.download = `LIBRO_IVA_DIGITAL_COMPRAS_ALICUOTAS_${fecha}.txt`;
+      aAlic.download = `LIBRO_IVA_DIGITAL_COMPRAS_ALICUOTAS_${fechaHoy}.txt`;
+      document.body.appendChild(aAlic);
       aAlic.click();
-    }, 500);
+      document.body.removeChild(aAlic);
+    }, 1500);
   };
 
   const esUSD = (g: any) => g.moneda === "USD";
