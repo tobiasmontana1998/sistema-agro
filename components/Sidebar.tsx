@@ -15,6 +15,7 @@ const navItems = [
   {
     section: "GESTIÓN",
     items: [
+      { href: "/asistente", label: "Asistente IA", icon: "🤖" },
       { href: "/control-gestion/gastos", label: "Gastos", icon: "💳" },
       { href: "/control-gestion/facturas", label: "Cargar Gasto", icon: "➕" },
       { href: "/control-gestion/proveedores", label: "Proveedores", icon: "🏢" },
@@ -30,7 +31,8 @@ const navItems = [
       { href: "/agricultura/stock", label: "Stock", icon: "📦" },
       { href: "/agricultura/remitos", label: "Remitos", icon: "📥" },
       { href: "/agricultura/historial-remitos", label: "Historial Remitos", icon: "📄" },
-      { href: "/agricultura/planes", label: "Planes de cultivos", icon: "📋" },
+      { href: "/agricultura/planes", label: "Planes de cultivos", icon: "🌱" },
+      { href: "/agricultura/monitoreos", label: "Monitoreos", icon: "🔍" },
       { href: "/agricultura/margenes", label: "Márgenes", icon: "📊" },
     ],
   },
@@ -48,78 +50,97 @@ export default function Sidebar() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Cerrar menu al cambiar de página
   useEffect(() => { setMenuAbierto(false); }, [pathname]);
 
   const navContent = (
-    <>
-      <div style={{ marginBottom: 32, paddingLeft: 8 }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: "#f5c542", letterSpacing: -0.5 }}>Sistema Agro</div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Administrador de Campo</div>
+    <div className="flex flex-col h-full">
+      {/* LOGO */}
+      <div className="mb-8 px-2">
+        <div className="text-xl font-extrabold text-yellow-400 tracking-tight">Sistema Agro</div>
+        <div className="text-xs text-white/30 mt-0.5">Administrador de Campo</div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      {/* NAV */}
+      <nav className="flex-1 overflow-y-auto space-y-6">
         {navItems.map((group) => (
-          <div key={group.section} style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 1, marginBottom: 8, paddingLeft: 8 }}>
+          <div key={group.section}>
+            <p className="text-[10px] font-semibold text-white/30 tracking-widest mb-2 px-2">
               {group.section}
+            </p>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all border-l-2
+                      ${active
+                        ? "bg-yellow-400/10 text-yellow-400 border-yellow-400 font-semibold"
+                        : "text-white/60 border-transparent hover:bg-white/5 hover:text-white/90"
+                      }`}
+                  >
+                    <span className="text-base leading-none">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                );
+              })}
             </div>
-            {group.items.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link key={item.href} href={item.href} style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "9px 12px", borderRadius: 8, marginBottom: 2,
-                  textDecoration: "none",
-                  color: active ? "#f5c542" : "rgba(255,255,255,0.7)",
-                  background: active ? "rgba(245,197,66,0.1)" : "transparent",
-                  fontWeight: active ? 600 : 400, fontSize: 14,
-                  borderLeft: active ? "2px solid #f5c542" : "2px solid transparent",
-                }}>
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
-              );
-            })}
           </div>
         ))}
-      </div>
+      </nav>
 
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 16 }}>
-        <button onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
-          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", borderRadius: 8, background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", fontSize: 14, cursor: "pointer" }}>
+      {/* CERRAR SESIÓN */}
+      <div className="border-t border-white/10 pt-4 mt-4">
+        <button
+          onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
+          className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm text-white/40 hover:text-white/70 hover:bg-white/5 transition-all"
+        >
           <span>🚪</span> Cerrar Sesión
         </button>
       </div>
-    </>
+    </div>
   );
 
+  /* ── MOBILE ── */
   if (esMobil) {
     return (
       <>
-        {/* BARRA SUPERIOR MÓVIL */}
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 56, background: "#0f1f17", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", zIndex: 1000 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#f5c542" }}>Sistema Agro</div>
-          <button onClick={() => setMenuAbierto(!menuAbierto)} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer" }}>
+        {/* TOPBAR */}
+        <div className="fixed top-0 left-0 right-0 h-14 bg-[#0f1f17] flex items-center justify-between px-4 z-50 shadow-lg">
+          <span className="text-lg font-extrabold text-yellow-400">Sistema Agro</span>
+          <button
+            onClick={() => setMenuAbierto(!menuAbierto)}
+            className="text-white text-2xl p-1 hover:text-yellow-400 transition-colors"
+          >
             {menuAbierto ? "✕" : "☰"}
           </button>
         </div>
 
-        {/* MENÚ DESPLEGABLE */}
+        {/* OVERLAY */}
         {menuAbierto && (
-          <div style={{ position: "fixed", top: 56, left: 0, right: 0, bottom: 0, background: "#0f1f17", zIndex: 999, padding: "16px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
-            {navContent}
-          </div>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setMenuAbierto(false)}
+          />
         )}
 
-        {/* ESPACIADOR para que el contenido no quede debajo de la barra */}
-        <div style={{ height: 56 }} />
+        {/* DRAWER */}
+        <div className={`fixed top-14 left-0 bottom-0 w-64 bg-[#0f1f17] z-50 p-4 overflow-y-auto transition-transform duration-300
+          ${menuAbierto ? "translate-x-0" : "-translate-x-full"}`}
+        >
+          {navContent}
+        </div>
+
+        {/* SPACER */}
+        <div className="h-14 flex-shrink-0" />
       </>
     );
   }
 
+  /* ── DESKTOP ── */
   return (
-    <div style={{ width: 240, background: "#0f1f17", color: "white", height: "100vh", padding: "24px 16px", display: "flex", flexDirection: "column", position: "sticky", top: 0, flexShrink: 0 }}>
+    <div className="w-56 bg-[#0f1f17] text-white min-h-screen p-5 flex flex-col sticky top-0 flex-shrink-0">
       {navContent}
     </div>
   );

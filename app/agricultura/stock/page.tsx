@@ -32,7 +32,7 @@ export default function StockPage() {
         .reduce((acc, m) => acc + Number(m.cantidad), 0);
 
       const salidas = movsFiltrados
-        .filter(m => m.tipo === "salida")
+        .filter(m => m.tipo === "salida" || m.tipo === "egreso")
         .reduce((acc, m) => acc + Number(m.cantidad), 0);
 
       return { ...insumo, stock_actual: entradas - salidas };
