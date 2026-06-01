@@ -79,20 +79,62 @@ export default function Gastos() {
     }
   };
 
-  const exportarCSV = () => {
-    const encabezado = ["Fecha emisión", "Fecha vencimiento", "Proveedor", "Factura", "Concepto", "Tipo", "Actividad", "Monto ARS", "Monto USD", "Dólar", "PDF"];
-    const filas = gastos.map((g) => [
-      g.Fecha, g.Fecha_vencimiento, g.proveedores?.razon_social, g.Numero_factura,
-      g.Concepto, g.Tipo, g.actividades?.nombre || "",
-      Number(g.Monto).toFixed(2), Number(g.monto_usd).toFixed(2), Number(g.dolar).toFixed(2), g.pdf_url || "",
-    ]);
-    const csv = [encabezado, ...filas].map((f) => f.join(";")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "gastos_completo.csv";
-    a.click();
-  };
+const exportarCSV = () => {
+  const encabezado = [
+    "Fecha emisión", "Fecha vencimiento", "Proveedor", "CUIT",
+    "N° Factura", "Tipo comprobante", "Concepto", "Categoría", "Actividad",
+    "Moneda", "Monto neto gravado", "No gravado", "Alícuota IVA %",
+    "IVA", "Percepciones", "Retenciones", "Monto total ARS",
+    "Monto USD", "Tipo de cambio", "CAE válido",
+    "Estado remito", "Pagada", "Total pagado ARS", "Saldo ARS", "PDF",
+  ];
+
+  const filas = gastos.map((g) => {
+    const totalPagado = getTotalPagado(g.id);
+    const saldo = (g.Monto || 0) - totalPagado;
+    const estadoRemito = g.Tipo === "Insumos" ? getEstadoRemito(g.id) : "N/A";
+
+    return [
+      g.Fecha || "",
+      g.Fecha_vencimiento || "",
+      g.proveedores?.razon_social || "",
+      g.proveedores?.cuit || "",
+      g.Numero_factura || "",
+      g.tipo_comprobante || "",
+      (g.Concepto || "").replace(/;/g, ","),
+      g.Tipo || "",
+      g.actividades?.nombre || "",
+      g.moneda || "ARS",
+      Number(g.monto_neto || 0).toFixed(2),
+      Number(g.no_gravado || 0).toFixed(2),
+      Number(g.alicuota_iva || 21).toFixed(1),
+      Number(g.monto_iva || 0).toFixed(2),
+      Number(g.percepciones || 0).toFixed(2),
+      Number(g.retenciones || 0).toFixed(2),
+      Number(g.Monto || 0).toFixed(2),
+      Number(g.monto_usd || 0).toFixed(2),
+      Number(g.dolar || 0).toFixed(2),
+      g.cae_valido ? "Sí" : g.cae ? "No verificado" : "",
+      estadoRemito === "vinculado" ? "Vinculado" : estadoRemito === "parcial" ? "Parcial" : estadoRemito === "sin_remito" ? "Sin remito" : "N/A",
+      g.pagada ? "Sí" : "No",
+      totalPagado.toFixed(2),
+      saldo > 0.01 ? saldo.toFixed(2) : "0.00",
+      g.pdf_url || "",
+    ];
+  });
+
+  const csv = [encabezado, ...filas]
+    .map((fila) => fila.map((celda) => `"${String(celda).replace(/"/g, '""')}"`).join(";"))
+    .join("\n");
+
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `gastos_completo_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
 
   const exportarIVAComprasTXT = () => {
     const tipoComprobanteMap: Record<string, string> = {
