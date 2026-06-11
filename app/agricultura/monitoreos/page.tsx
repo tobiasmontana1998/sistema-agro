@@ -150,7 +150,7 @@ export default function MonitoreosPage() {
                 const cultivo = m.lotes?.cultivo_activo || "—";
                 const icono = CULTIVOS_ICONOS[cultivo] || "🌱";
                 return (
-                  <tr key={m.id}>
+                  <tr key={m.id} onClick={() => router.push(`/agricultura/monitoreos/${m.id}`)} style={{ cursor: "pointer" }}>
                     <td style={{ ...td, whiteSpace: "nowrap", color: "#555" }}>
                       {m.fecha ? new Date(m.fecha + "T12:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                     </td>
@@ -190,8 +190,8 @@ export default function MonitoreosPage() {
                       ) : <span style={{ color: "#ccc" }}>—</span>}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
-                      <button
-                        onClick={() => eliminarMonitoreo(m.id)}
+                     <button
+  onClick={(e) => { e.stopPropagation(); eliminarMonitoreo(m.id); }}
                         style={{ padding: "6px 10px", background: "#fee", border: "1px solid #fcc", borderRadius: 6, cursor: "pointer", fontSize: 12, color: "red" }}
                       >
                         🗑

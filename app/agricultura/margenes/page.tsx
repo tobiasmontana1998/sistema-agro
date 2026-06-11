@@ -29,6 +29,7 @@ export default function MargenesPage() {
   const [rendimientoReal, setRendimientoReal] = useState("");
   const [costoRealPorCategoria, setCostoRealPorCategoria] = useState<Record<string, number>>({});
   const [facturasLabores, setFacturasLabores] = useState<any[]>([]);
+  const [cargandoFuturos, setCargandoFuturos] = useState(false);
 
   const loteIdRef = useRef(loteId);
   useEffect(() => { loteIdRef.current = loteId; }, [loteId]);
@@ -47,28 +48,45 @@ export default function MargenesPage() {
   }, [loteId, lotes]);
 
   const cargarDatos = async () => {
-    const [{ data: lotesData }, { data: preciosData }, { data: futuresData }] = await Promise.all([
+    const [{ data: lotesData }, { data: preciosData }, { data: futuresData }, futurosBolsa] = await Promise.all([
       supabase.from("lotes").select("*"),
       supabase.from("precios_insumos").select("*"),
       supabase.from("precios_futuros").select("*"),
+      fetch("/api/futuros-granos").then(r => r.json()).catch(() => null),
     ]);
+
     setLotes(lotesData || []);
     const map: Record<string, number> = {};
     (preciosData || []).forEach((p: any) => { map[p.insumo_id] = p.precio; });
     setPreciosInsumos(map);
-    setPreciosFuturos(futuresData || []);
+
+    // Mezclar: si hay precio de Bolsa de Cereales, usarlo; si no, mantener el manual
+    const futurosActualizados = (futuresData || []).map((f: any) => {
+      const clave = f.cultivo?.toLowerCase();
+      const deBolsa = futurosBolsa?.[clave];
+      if (deBolsa?.precio) {
+        return {
+          ...f,
+          precio: deBolsa.precio,
+          posicion: deBolsa.posicion,
+          fuente: "Bolsa de Cereales",
+        };
+      }
+      return { ...f, fuente: "Manual" };
+    });
+    setPreciosFuturos(futurosActualizados);
   };
 
   const cargarDatosLote = async (loteId: string, planId: string | null) => {
     const queries: Promise<any>[] = [
-supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
-        supabase.from("labores").select("*").eq("Lote_id", loteId),
+      supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
+      supabase.from("labores").select("*").eq("Lote_id", loteId),
       supabase.from("stock_movimientos").select("insumo_id, cantidad, referencia_id, insumos(categoria, subcategoria)").eq("tipo", "salida").eq("motivo", "labor"),
       supabase.from("factura_items").select("insumo_id, cantidad, precio_unitario, facturas!factura_items_factura_id_fkey(moneda, dolar)"),
     ];
 
     if (planId) {
-queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)").eq("plan_id", planId).order("orden") as any);
+      queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)").eq("plan_id", planId).order("orden") as any);
     }
 
     const results = await Promise.all(queries);
@@ -76,8 +94,7 @@ queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)")
     const laboresData = results[1].data || [];
     const laborIds = laboresData.map((l: any) => l.id);
 
-    // Traer facturas vinculadas a estas labores
-   const { data: facturasData } = laborIds.length > 0
+    const { data: facturasData } = laborIds.length > 0
       ? await supabase.from("facturas").select("id, Monto, monto_neto, monto_usd, dolar, moneda, Labor_id").in("Labor_id", laborIds)
       : { data: [] };
 
@@ -88,7 +105,7 @@ queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)")
     const laboresDelLote = laborIds;
     const todasSalidas = results[2].data || [];
     const salidasLote = todasSalidas.filter((s: any) => laboresDelLote.includes(s.referencia_id));
-  
+
     const facturasItems = results[3].data || [];
 
     const totalesPorInsumo: Record<string, { totalValor: number; totalCantidad: number }> = {};
@@ -126,19 +143,18 @@ queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)")
       costoRealPorCat[categoria] += costoporHa;
     }
 
-    // Sumar facturas de labores a la categoría LABOR
-for (const f of facturasData || []) {
-  const montoBase = f.monto_neto || f.Monto || 0;
-  const usdTotal = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
-  const laborAsociada = laboresData.find((l: any) => l.id === f.Labor_id);
-  const haLabor = Number(laborAsociada?.hectareas) || 1;
-  const costoporHa = usdTotal / haLabor;
-  if (!costoRealPorCat["LABOR"]) costoRealPorCat["LABOR"] = 0;
-  costoRealPorCat["LABOR"] += costoporHa;
-}
+    for (const f of facturasData || []) {
+      const montoBase = f.monto_neto || f.Monto || 0;
+      const usdTotal = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
+      const laborAsociada = laboresData.find((l: any) => l.id === f.Labor_id);
+      const haLabor = Number(laborAsociada?.hectareas) || 1;
+      const costoporHa = usdTotal / haLabor;
+      if (!costoRealPorCat["LABOR"]) costoRealPorCat["LABOR"] = 0;
+      costoRealPorCat["LABOR"] += costoporHa;
+    }
 
-setCostoRealPorCategoria(costoRealPorCat);
-setCostoInsumosLote(costoInsumos);
+    setCostoRealPorCategoria(costoRealPorCat);
+    setCostoInsumosLote(costoInsumos);
 
     if (planId) setPlanItems(results[4]?.data || []);
     else setPlanItems([]);
@@ -149,9 +165,26 @@ setCostoInsumosLote(costoInsumos);
       precio: Number(precioTemp),
       fecha_actualizacion: new Date().toISOString(),
     }).eq("cultivo", cultivo);
-    setPreciosFuturos(prev => prev.map(p => p.cultivo === cultivo ? { ...p, precio: Number(precioTemp) } : p));
+    setPreciosFuturos(prev => prev.map(p => p.cultivo === cultivo ? { ...p, precio: Number(precioTemp), fuente: "Manual" } : p));
     setEditandoPrecio(null);
     setPrecioTemp("");
+  };
+
+  const actualizarDesdeBolsa = async () => {
+    setCargandoFuturos(true);
+    try {
+      const res = await fetch("/api/futuros-granos");
+      const bolsa = await res.json();
+      setPreciosFuturos(prev => prev.map(f => {
+        const clave = f.cultivo?.toLowerCase();
+        const deBolsa = bolsa?.[clave];
+        if (deBolsa?.precio) {
+          return { ...f, precio: deBolsa.precio, posicion: deBolsa.posicion, fuente: "Bolsa de Cereales" };
+        }
+        return f;
+      }));
+    } catch {}
+    setCargandoFuturos(false);
   };
 
   const guardarRendimiento = async (campo: string, valor: string) => {
@@ -198,12 +231,11 @@ setCostoInsumosLote(costoInsumos);
 
   const ingresoRealPorHa = ha > 0 ? liquidaciones.reduce((acc, l) => acc + (l.monto_neto || 0), 0) / ha : 0;
 
-
- const costoFacturasLabores = facturasLabores.reduce((acc, f) => {
-  const montoBase = f.monto_neto || f.Monto || 0;
-  const usd = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
-  return acc + usd;
-}, 0);
+  const costoFacturasLabores = facturasLabores.reduce((acc, f) => {
+    const montoBase = f.monto_neto || f.Monto || 0;
+    const usd = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
+    return acc + usd;
+  }, 0);
 
   const costoRealPorHa = ha > 0 ? (costoFacturasLabores + costoInsumosLote) / ha : 0;
   const margenRealPorHa = ingresoRealPorHa - costoRealPorHa - arrendamientoPorHa;
@@ -221,18 +253,40 @@ setCostoInsumosLote(costoInsumos);
         <p style={{ margin: "4px 0 0", color: "#888", fontSize: 14 }}>Margen bruto presupuestado vs real.</p>
       </div>
 
+      {/* Precios futuros */}
       <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: 20, marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>💵 Precios futuros a cosecha</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>💵 Precios futuros a cosecha</div>
+          <button
+            onClick={actualizarDesdeBolsa}
+            disabled={cargandoFuturos}
+            style={{ padding: "6px 14px", background: "#0f1f17", color: "white", border: "none", borderRadius: 8, cursor: cargandoFuturos ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600, opacity: cargandoFuturos ? 0.7 : 1 }}
+          >
+            {cargandoFuturos ? "Actualizando..." : "🔄 Actualizar desde Bolsa"}
+          </button>
+        </div>
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
           {preciosFuturos.map(p => (
-            <div key={p.cultivo} style={{ background: "#f8f9fa", borderRadius: 8, padding: "12px 16px", minWidth: 180 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>{p.cultivo.toUpperCase()} — {p.posicion}</div>
+            <div key={p.cultivo} style={{ background: "#f8f9fa", borderRadius: 8, padding: "12px 16px", minWidth: 200 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888" }}>{p.cultivo.toUpperCase()} — {p.posicion}</div>
+                <span style={{
+                  fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 99,
+                  background: p.fuente === "Bolsa de Cereales" ? "#e8f5e9" : "#fff8e1",
+                  color: p.fuente === "Bolsa de Cereales" ? "#2e7d32" : "#f57f17",
+                }}>
+                  {p.fuente === "Bolsa de Cereales" ? "🟢 Bolsa" : "✏️ Manual"}
+                </span>
+              </div>
               {editandoPrecio === p.cultivo ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-                  <input type="number" value={precioTemp} onChange={(e) => setPrecioTemp(e.target.value)}
+                  <input
+                    type="number" value={precioTemp}
+                    onChange={(e) => setPrecioTemp(e.target.value)}
                     style={{ width: 90, padding: "4px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 13 }}
                     placeholder="USD/tn" autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") guardarPrecioFuturo(p.cultivo); }} />
+                    onKeyDown={(e) => { if (e.key === "Enter") guardarPrecioFuturo(p.cultivo); }}
+                  />
                   <button onClick={() => guardarPrecioFuturo(p.cultivo)}
                     style={{ padding: "4px 10px", background: "#0f1f17", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✓</button>
                   <button onClick={() => setEditandoPrecio(null)}
@@ -245,7 +299,10 @@ setCostoInsumosLote(costoInsumos);
                     style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#888" }}>✏️</button>
                 </div>
               )}
-              {p.fecha_actualizacion && (
+              {p.fuente === "Bolsa de Cereales" && (
+                <div style={{ fontSize: 10, color: "#bbb", marginTop: 4 }}>Bolsa de Cereales · actualizado automático</div>
+              )}
+              {p.fuente === "Manual" && p.fecha_actualizacion && (
                 <div style={{ fontSize: 10, color: "#bbb", marginTop: 4 }}>
                   Actualizado: {new Date(p.fecha_actualizacion).toLocaleDateString("es-AR")}
                 </div>
@@ -255,6 +312,7 @@ setCostoInsumosLote(costoInsumos);
         </div>
       </div>
 
+      {/* Selector de lote */}
       <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: 24, marginBottom: 24 }}>
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: 16, alignItems: "end" }}>
           <div>
@@ -299,6 +357,7 @@ setCostoInsumosLote(costoInsumos);
         )}
       </div>
 
+      {/* Tabla de márgenes */}
       {loteInfo && (
         <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
