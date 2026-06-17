@@ -53,7 +53,6 @@ function CargarFacturaInner() {
   const [busquedaItems, setBusquedaItems] = useState<Record<number, string>>({});
   const [mostrarDropdown, setMostrarDropdown] = useState<Record<number, boolean>>({});
 
-  // ARCA - CAE
   const [cae, setCae] = useState("");
   const [caeEstado, setCaeEstado] = useState<"idle" | "verificando" | "valido" | "invalido">("idle");
 
@@ -147,55 +146,42 @@ function CargarFacturaInner() {
   }, [id]);
 
   const verificarCAE = async () => {
-  if (!cae) { alert("Ingresá el CAE"); return; }
-  if (!proveedorId) { alert("Seleccioná un proveedor primero"); return; }
-  if (!numeroFactura) { alert("Ingresá el número de comprobante primero"); return; }
-  if (!fecha) { alert("Ingresá la fecha primero"); return; }
-  if (!montoIngresado) { alert("Ingresá el monto primero"); return; }
+    if (!cae) { alert("Ingresá el CAE"); return; }
+    if (!proveedorId) { alert("Seleccioná un proveedor primero"); return; }
+    if (!numeroFactura) { alert("Ingresá el número de comprobante primero"); return; }
+    if (!fecha) { alert("Ingresá la fecha primero"); return; }
+    if (!montoIngresado) { alert("Ingresá el monto primero"); return; }
 
-  setCaeEstado("verificando");
-  try {
-    const proveedor = proveedores.find(p => p.id === proveedorId);
-    
-    // Extraer punto de venta y número del formato 0002-00001981
-    const partes = numeroFactura.split('-');
-    const ptoVta = partes.length === 2 ? parseInt(partes[0]) : 1;
-    const nroComp = partes.length === 2 ? parseInt(partes[1]) : parseInt(numeroFactura);
-
-    // Tipo de comprobante
-    const tipoMap: Record<string, number> = {
-      'Factura A': 1, 'Factura B': 6, 'Factura C': 11,
-      'Nota de Crédito A': 3, 'Nota de Crédito B': 8, 'Nota de Crédito C': 13,
-    };
-    const tipoCbte = tipoMap[tipoComprobante] || 1;
-
-    // Fecha en formato YYYYMMDD
-    const fechaAFIP = fecha.replace(/-/g, '');
-
-    const res = await fetch("/api/arca/verificar-cae", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        cae,
-        cuitEmisor: proveedor?.cuit,
-        tipoComprobante: tipoCbte,
-        ptoVta,
-        nroComprobante: nroComp,
-        fecha: fechaAFIP,
-        importe: montoTotal,
-      }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      setCaeEstado("invalido");
-      console.error("Error ARCA:", data.error);
-    } else {
-      setCaeEstado(data.valido ? "valido" : "invalido");
-    }
-  } catch {
-    setCaeEstado("invalido");
-  }
-};
+    setCaeEstado("verificando");
+    try {
+      const proveedor = proveedores.find(p => p.id === proveedorId);
+      const partes = numeroFactura.split('-');
+      const ptoVta = partes.length === 2 ? parseInt(partes[0]) : 1;
+      const nroComp = partes.length === 2 ? parseInt(partes[1]) : parseInt(numeroFactura);
+      const tipoMap: Record<string, number> = {
+        'Factura A': 1, 'Factura B': 6, 'Factura C': 11,
+        'Nota de Crédito A': 3, 'Nota de Crédito B': 8, 'Nota de Crédito C': 13,
+      };
+      const tipoCbte = tipoMap[tipoComprobante] || 1;
+      const fechaAFIP = fecha.replace(/-/g, '');
+      const res = await fetch("/api/arca/verificar-cae", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cae,
+          cuitEmisor: proveedor?.cuit,
+          tipoComprobante: tipoCbte,
+          ptoVta,
+          nroComprobante: nroComp,
+          fecha: fechaAFIP,
+          importe: montoTotal,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) { setCaeEstado("invalido"); console.error("Error ARCA:", data.error); }
+      else { setCaeEstado(data.valido ? "valido" : "invalido"); }
+    } catch { setCaeEstado("invalido"); }
+  };
 
   const agregarItem = () => setItems([...items, { descripcion: "", insumo_id: "", cantidad: "", unidad: "", precio_unitario: "", descuento: "0" }]);
   const quitarItem = (index: number) => setItems(items.filter((_, i) => i !== index));
@@ -236,9 +222,11 @@ function CargarFacturaInner() {
 
     const urlPdf = await subirPdf();
 
+    // ── proveedor_id incluido en payload para que el UPDATE también lo actualice ──
     const payload = {
       Fecha: fecha,
       Fecha_vencimiento: fechaVto || null,
+      proveedor_id: proveedorId,
       Numero_factura: numeroFactura,
       Concepto: concepto,
       Tipo: tipo,
@@ -268,7 +256,7 @@ function CargarFacturaInner() {
       const { error: e } = await supabase.from("facturas").update(payload).eq("id", id);
       error = e;
     } else {
-      const { data: nueva, error: e } = await supabase.from("facturas").insert([{ ...payload, proveedor_id: proveedorId }]).select().single();
+      const { data: nueva, error: e } = await supabase.from("facturas").insert([payload]).select().single();
       error = e;
       facturaId = nueva?.id;
     }
@@ -349,7 +337,6 @@ function CargarFacturaInner() {
               </select>
             </div>
 
-            {/* CAE - Verificación ARCA */}
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={lbl}>CAE (CÓDIGO DE AUTORIZACIÓN ELECTRÓNICA)</div>
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -365,13 +352,9 @@ function CargarFacturaInner() {
                   style={{
                     padding: "10px 16px",
                     background: caeEstado === "verificando" || !cae ? "#ccc" : "#0f1f17",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 8,
+                    color: "white", border: "none", borderRadius: 8,
                     cursor: caeEstado === "verificando" || !cae ? "not-allowed" : "pointer",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    whiteSpace: "nowrap",
+                    fontWeight: 600, fontSize: 13, whiteSpace: "nowrap",
                   }}
                 >
                   {caeEstado === "verificando" ? "Verificando..." : "🔍 Verificar en ARCA"}
@@ -731,7 +714,6 @@ function CargarFacturaInner() {
                 <div style={{ fontSize: 16, fontWeight: 800, color: "#0f1f17" }}>{moneda} {totalItems.toFixed(2)}</div>
               </>
             )}
-            {/* Estado CAE en resumen */}
             {cae && (
               <div style={{ borderTop: "1px solid #f0f0f0", marginTop: 12, paddingTop: 12 }}>
                 <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>ESTADO CAE</div>

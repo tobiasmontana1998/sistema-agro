@@ -32,18 +32,15 @@ export default function Gastos() {
 
   useEffect(() => { cargarDatos(); }, []);
 
-  // Helpers para obtener percepciones con fallback
-  // Si existen percepciones_iva / percepciones_iibb las usa,
-  // si no, reparte el campo percepciones genérico entre los dos.
-  const getPercIVA  = (g: any) => Number(g.percepciones_iva  ?? g.percepciones ?? 0);
-  const getPercIIBB = (g: any) => Number(g.percepciones_iibb ?? 0);
+  const getPercIVA  = (g: any) => Number(g.percepciones ?? 0);
+  const getPercIIBB = (_g: any) => 0;
 
   const cargarDatos = async () => {
-    const [{ data: facturas, error: errFact }, { data: pagosData }, { data: remitosData }, { data: items }] = await Promise.all([
+    const [{ data: facturas }, { data: pagosData }, { data: remitosData }, { data: items }] = await Promise.all([
       supabase.from("facturas").select(`
         id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, pdf_url,
         Monto, monto_usd, dolar, pagada, moneda, proveedor_id,
-        tipo_comprobante, monto_neto, monto_iva, percepciones, percepciones_iva, percepciones_iibb, retenciones,
+        tipo_comprobante, monto_neto, monto_iva, percepciones, retenciones,
         no_gravado, alicuota_iva, cae, cae_valido,
         proveedores!fk_facturas_proveedor (razon_social, cuit),
         actividades!fk_facturas_actividad (nombre),
@@ -54,21 +51,7 @@ export default function Gastos() {
       supabase.from("factura_items").select("factura_id, insumo_id, cantidad"),
     ]);
 
-    // Si falla por columnas que no existen, reintentamos sin ellas
-    if (errFact) {
-      const { data: facturasFallback } = await supabase.from("facturas").select(`
-        id, Fecha, Fecha_vencimiento, Numero_factura, Concepto, Tipo, pdf_url,
-        Monto, monto_usd, dolar, pagada, moneda, proveedor_id,
-        tipo_comprobante, monto_neto, monto_iva, percepciones, retenciones,
-        no_gravado, alicuota_iva, cae, cae_valido,
-        proveedores!fk_facturas_proveedor (razon_social, cuit),
-        actividades!fk_facturas_actividad (nombre),
-        labores!fk_facturas_labor (numero)
-      `).order("Fecha", { ascending: false });
-      setGastos(facturasFallback || []);
-    } else {
-      setGastos(facturas || []);
-    }
+    setGastos(facturas || []);
 
     setPagos(pagosData || []);
     setRemitos(remitosData || []);
@@ -293,15 +276,19 @@ export default function Gastos() {
     const tipoLabel: Record<string, string> = {
       "Factura A": "FC", "Factura B": "FC", "Factura C": "FC",
       "Nota de Crédito A": "NC", "Nota de Crédito B": "NC", "Nota de Crédito C": "NC",
-      "Recibo": "RT",
+      "Nota de Débito A": "ND", "Nota de Débito B": "ND", "Nota de Débito C": "ND",
+      "Recibo": "RT", "Recibo A": "RT", "Recibo B": "RT", "Recibo C": "RT",
+      "Liquidación": "LQ", "Ticket": "TK", "Otro": "OT",
     };
     const letraLabel: Record<string, string> = {
       "Factura A": "A", "Factura B": "B", "Factura C": "C",
       "Nota de Crédito A": "A", "Nota de Crédito B": "B", "Nota de Crédito C": "C",
-      "Recibo": "",
+      "Nota de Débito A": "A", "Nota de Débito B": "B", "Nota de Débito C": "C",
+      "Recibo A": "A", "Recibo B": "B", "Recibo C": "C",
     };
 
-    const facturas = gastosFiltrados.filter(g => g.tipo_comprobante && tipoLabel[g.tipo_comprobante]);
+    // Incluir TODAS las facturas filtradas, incluso sin tipo_comprobante mapeado
+    const facturas = gastosFiltrados;
 
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const PW = 297;
@@ -408,7 +395,7 @@ export default function Gastos() {
       const alturasNecesarias = 5.5 + (percIIBB > 0 ? 4 : 0) + (percIVA > 0 ? 4 : 0) + 1.5;
       checkPage(alturasNecesarias);
 
-      const tipo   = tipoLabel[g.tipo_comprobante] || "";
+      const tipo   = tipoLabel[g.tipo_comprobante] || (g.tipo_comprobante ? g.tipo_comprobante.substring(0, 3).toUpperCase() : "OT");
       const letra  = letraLabel[g.tipo_comprobante] || "";
       const partes = (g.Numero_factura || "").split("-");
       const pv     = partes[0] ? String(parseInt(partes[0])).padStart(5, "0") : "00000";
