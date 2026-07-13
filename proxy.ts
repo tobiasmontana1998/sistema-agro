@@ -36,7 +36,12 @@ export async function proxy(req: NextRequest) {
 
   console.log("PROXY →", pathname, "| user:", user?.email ?? "ninguno");
 
-  if (pathname.startsWith("/login")) {
+  // /login y /auth/callback quedan afuera del chequeo de sesión:
+  // /login porque es donde mandamos a los no logueados, y /auth/callback
+  // porque en ese momento el code todavía no se canjeó por una sesión,
+  // así que "user" siempre va a venir null ahí — si lo bloqueamos acá,
+  // el route handler de /auth/callback nunca llega a ejecutarse.
+  if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) {
     return res;
   }
 
