@@ -35,6 +35,18 @@ export default function Gastos() {
   const getPercIVA  = (g: any) => Number(g.percepciones ?? 0);
   const getPercIIBB = (_g: any) => 0;
 
+  // ── PARSEO ROBUSTO DE Numero_factura ──────────────────────────────────────
+  // Antes se usaba `.split("-")` a secas, lo que rompía (NaN, ceros, números
+  // gigantes) apenas Numero_factura no venía en formato "PPPPP-NNNNNNNN"
+  // (por ejemplo gastos bancarios cargados distinto). Esta función centraliza
+  // el parseo y devuelve { pv, nro, valido } sin inventar datos cuando el
+  // formato no matchea.
+  const parseNumFactura = (numFactura?: string | null): { pv: string; nro: string; valido: boolean } => {
+    const m = String(numFactura || "").trim().match(/^(\d+)\s*-\s*(\d+)$/);
+    if (!m) return { pv: "", nro: "", valido: false };
+    return { pv: m[1], nro: m[2], valido: true };
+  };
+
   const cargarDatos = async () => {
     const [{ data: facturas }, { data: pagosData }, { data: remitosData }, { data: items }] = await Promise.all([
       supabase.from("facturas").select(`
@@ -185,6 +197,10 @@ export default function Gastos() {
       "Factura A": "001", "Factura B": "006", "Factura C": "011",
       "Nota de Crédito A": "003", "Nota de Crédito B": "008", "Nota de Crédito C": "013",
       "Recibo": "015",
+      // Comprobantes que no encuadran en la RG 1415 (comisiones bancarias,
+      // resúmenes, etc.) se informan en el registro de compras con el
+      // código 099 - "Otros Comp. que no cumplen con la RG 1415 y sus modif."
+      "Otro": "099",
     };
     const alicuotaMap: Record<string, string> = {
       "0": "0003", "10.5": "0004", "21": "0005", "27": "0006",
@@ -202,9 +218,11 @@ export default function Gastos() {
       const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
       const esFacturaBC = ["006", "008", "011", "013"].includes(tipoComp);
       const fecha = (g.Fecha || "").replace(/-/g, "").padStart(8, "0");
-      const partes = (g.Numero_factura || "00000-00000000").split("-");
-      const puntoVenta = padN(partes[0] || "0", 5);
-      const nroComp = padN(partes[1] || "0", 20);
+      const { pv: pvRaw, nro: nroRaw } = parseNumFactura(g.Numero_factura);
+      // Para código 099 (Otros Comp. que no cumplen la RG 1415 — comisiones
+      // bancarias, resúmenes, etc.) ARCA exige punto de venta = 0.
+      const puntoVenta = tipoComp === "099" ? "00000" : padN(pvRaw, 5);
+      const nroComp = padN(nroRaw, 20);
       const despacho = " ".repeat(16);
       const codDoc = "80";
       const cuit = padN((g.proveedores?.cuit || "0").replace(/-/g, ""), 20);
@@ -243,9 +261,9 @@ export default function Gastos() {
       })
       .map((g) => {
         const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
-        const partes = (g.Numero_factura || "00000-00000000").split("-");
-        const puntoVenta = padN(partes[0] || "0", 5);
-        const nroComp = padN(partes[1] || "0", 20);
+        const { pv: pvRaw, nro: nroRaw } = parseNumFactura(g.Numero_factura);
+        const puntoVenta = tipoComp === "099" ? "00000" : padN(pvRaw, 5);
+        const nroComp = padN(nroRaw, 20);
         const codDoc = "80";
         const cuit = padN((g.proveedores?.cuit || "0").replace(/-/g, ""), 20);
         const neto = fmt15(Number(g.monto_neto || 0));
@@ -397,10 +415,13 @@ export default function Gastos() {
 
       const tipo   = tipoLabel[g.tipo_comprobante] || (g.tipo_comprobante ? g.tipo_comprobante.substring(0, 3).toUpperCase() : "OT");
       const letra  = letraLabel[g.tipo_comprobante] || "";
-      const partes = (g.Numero_factura || "").split("-");
-      const pv     = partes[0] ? String(parseInt(partes[0])).padStart(5, "0") : "00000";
-      const nro    = partes[1] ? String(parseInt(partes[1])).padStart(8, "0") : "00000000";
-      const compStr = `${tipo}${letra}${pv}-${nro}`;
+      const { pv: pvRaw, nro: nroRaw, valido: numeroValido } = parseNumFactura(g.Numero_factura);
+      // Si el formato "PV-NRO" no matchea (ej. gastos bancarios cargados
+      // distinto), mostramos el número tal cual está cargado en vez de
+      // inventar ceros o un NaN.
+      const compStr = numeroValido
+        ? `${tipo}${letra}${pvRaw.padStart(5, "0").slice(-5)}-${nroRaw.padStart(8, "0")}`
+        : `${tipo}${letra} ${g.Numero_factura || "SIN NÚMERO"}`;
       const cuit   = (g.proveedores?.cuit || "").replace(/-/g, "");
       const rs     = (g.proveedores?.razon_social || "—").substring(0, 28);
 
@@ -643,9 +664,9 @@ export default function Gastos() {
       .filter(g => g.tipo_comprobante && tipoComprobanteMap[g.tipo_comprobante])
       .map((g) => {
         const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
-        const partes = (g.Numero_factura || "00000-00000000").split("-");
-        const puntoVenta = String(parseInt(partes[0] || "0")).padStart(5, "0");
-        const nroComp = String(parseInt(partes[1] || "0")).padStart(20, "0");
+        const { pv: pvRaw, nro: nroRaw } = parseNumFactura(g.Numero_factura);
+        const puntoVenta = pvRaw.padStart(5, "0").slice(-5);
+        const nroComp = nroRaw.padStart(20, "0");
         const cuitLimpio = (g.proveedores?.cuit || "").replace(/-/g, "").padStart(20, "0");
         const fechaFactura = (g.Fecha || "").replace(/-/g, "");
         const lineaArca = lineasArca.find(l =>
@@ -669,8 +690,8 @@ export default function Gastos() {
         .filter(g => tipoComprobanteMap[g.tipo_comprobante])
         .map(g => {
           const tipoComp = tipoComprobanteMap[g.tipo_comprobante];
-          const partes = (g.Numero_factura || "").split("-");
-          return `${tipoComp}${String(parseInt(partes[0] || "0")).padStart(5, "0")}${String(parseInt(partes[1] || "0")).padStart(20, "0")}`;
+          const { pv: pvRaw, nro: nroRaw } = parseNumFactura(g.Numero_factura);
+          return `${tipoComp}${pvRaw.padStart(5, "0").slice(-5)}${nroRaw.padStart(20, "0")}`;
         })
     );
     lineasArca.forEach(l => {
