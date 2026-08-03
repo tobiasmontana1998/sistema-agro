@@ -55,8 +55,11 @@ function CargarFacturaInner() {
 
   const [cae, setCae] = useState("");
   const [caeEstado, setCaeEstado] = useState<"idle" | "verificando" | "valido" | "invalido">("idle");
+  const [caeObservaciones, setCaeObservaciones] = useState<string[]>([]);
 
   const esNotaCredito = tipoComprobante.includes("Nota de Crédito");
+  const esNotaDebito = tipoComprobante.includes("Nota de Débito");
+  const esNota = esNotaCredito || esNotaDebito;
 
   const montoNetoPuro = Number(montoIngresado) || 0;
   const montoIvaPuro = montoNetoPuro * (Number(alicuotaIva) / 100);
@@ -73,14 +76,22 @@ function CargarFacturaInner() {
       supabase.from("labores").select(),
       supabase.from("facturas").select("id, Numero_factura, Concepto, proveedores(razon_social)").order("Fecha", { ascending: false }),
       supabase.from("insumos").select().order("nombre"),
-      supabase.from("remitos").select("id, numero, numero_remito, fecha, proveedor_id, proveedores(razon_social), stock_movimientos(insumo_id, cantidad, insumos(nombre))").is("factura_id", null).order("created_at", { ascending: false }),
+      // Traemos TODOS los remitos recientes (no solo los que tienen
+      // factura_id null a nivel remito, porque un remito puede cubrir varias
+      // facturas y quedar con factura_id=null aunque ya tenga alguna línea
+      // vinculada). El filtrado de "todavía tiene algo pendiente" se hace
+      // más abajo, línea por línea, con el factura_id de cada
+      // stock_movimiento.
+      supabase.from("remitos").select("id, numero, numero_remito, fecha, proveedor_id, proveedores(razon_social), stock_movimientos(insumo_id, cantidad, factura_id, insumos(nombre))").order("created_at", { ascending: false }).limit(200),
     ]).then(([{ data: acts }, { data: provs }, { data: labs }, { data: facts }, { data: ins }, { data: rems }]) => {
       setActividades(acts || []);
       setProveedores(provs || []);
       setLabores(labs || []);
       setFacturas(facts || []);
       setInsumos(ins || []);
-      setRemitos(rems || []);
+      // Un remito sirve para asociar si tiene AL MENOS UNA línea todavía sin
+      // factura vinculada.
+      setRemitos((rems || []).filter((r: any) => (r.stock_movimientos || []).some((m: any) => !m.factura_id)));
     });
   }, []);
 
@@ -129,6 +140,7 @@ function CargarFacturaInner() {
       setPdfUrl(data.pdf_url || null);
       setCae(data.cae || "");
       setCaeEstado(data.cae ? "valido" : "idle");
+      setCaeObservaciones([]);
     });
 
     supabase.from("factura_items").select("*").eq("factura_id", id).then(({ data }) => {
@@ -153,6 +165,7 @@ function CargarFacturaInner() {
     if (!montoIngresado) { alert("Ingresá el monto primero"); return; }
 
     setCaeEstado("verificando");
+    setCaeObservaciones([]);
     try {
       const proveedor = proveedores.find(p => p.id === proveedorId);
       const partes = numeroFactura.split('-');
@@ -160,10 +173,18 @@ function CargarFacturaInner() {
       const nroComp = partes.length === 2 ? parseInt(partes[1]) : parseInt(numeroFactura);
       const tipoMap: Record<string, number> = {
         'Factura A': 1, 'Factura B': 6, 'Factura C': 11,
+        'Nota de Débito A': 2, 'Nota de Débito B': 7, 'Nota de Débito C': 12,
         'Nota de Crédito A': 3, 'Nota de Crédito B': 8, 'Nota de Crédito C': 13,
       };
       const tipoCbte = tipoMap[tipoComprobante] || 1;
       const fechaAFIP = fecha.replace(/-/g, '');
+
+      // AFIP registra el ImpTotal en la MONEDA ORIGINAL del comprobante.
+      // Si la factura es en USD, hay que constatar contra montoTotalPuro
+      // (el total en USD), no contra montoTotal (que ya viene convertido
+      // a ARS con el tipo de cambio del día).
+      const importeParaAfip = moneda === "USD" ? montoTotalPuro : montoTotal;
+
       const res = await fetch("/api/arca/verificar-cae", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,13 +195,22 @@ function CargarFacturaInner() {
           ptoVta,
           nroComprobante: nroComp,
           fecha: fechaAFIP,
-          importe: montoTotal,
+          importe: importeParaAfip,
         }),
       });
       const data = await res.json();
-      if (data.error) { setCaeEstado("invalido"); console.error("Error ARCA:", data.error); }
-      else { setCaeEstado(data.valido ? "valido" : "invalido"); }
-    } catch { setCaeEstado("invalido"); }
+      if (data.error) {
+        setCaeEstado("invalido");
+        setCaeObservaciones([data.error]);
+        console.error("Error ARCA:", data.error);
+      } else {
+        setCaeEstado(data.valido ? "valido" : "invalido");
+        setCaeObservaciones(data.observaciones || []);
+      }
+    } catch {
+      setCaeEstado("invalido");
+      setCaeObservaciones(["No se pudo conectar con el servicio de ARCA."]);
+    }
   };
 
   const agregarItem = () => setItems([...items, { descripcion: "", insumo_id: "", cantidad: "", unidad: "", precio_unitario: "", descuento: "0" }]);
@@ -264,8 +294,27 @@ function CargarFacturaInner() {
     if (error) { alert(error.message); return; }
 
     if (remito && facturaId) {
-      await supabase.from("remitos").update({ factura_id: facturaId }).eq("id", remito);
-      await supabase.from("stock_movimientos").update({ factura_id: facturaId }).eq("remito_id", remito);
+      // Solo vinculamos las líneas de ESTE remito que todavía no tenían
+      // factura asignada — así, si el remito cubre más de una factura, no
+      // pisamos el vínculo que ya tenía la otra.
+      await supabase.from("stock_movimientos")
+        .update({ factura_id: facturaId })
+        .eq("remito_id", remito)
+        .is("factura_id", null);
+
+      // remitos.factura_id es una columna "legado" de un solo vínculo.
+      // La actualizamos solo si, después de este cambio, TODAS las líneas
+      // del remito terminaron apuntando a la misma factura; si el remito
+      // sigue cubriendo más de una, la dejamos en null (el vínculo real
+      // vive en cada línea de stock_movimientos).
+      const { data: movimientosRemito } = await supabase
+        .from("stock_movimientos")
+        .select("factura_id")
+        .eq("remito_id", remito);
+      const facturaIdsDelRemito = new Set((movimientosRemito || []).map((m: any) => m.factura_id).filter(Boolean));
+      await supabase.from("remitos")
+        .update({ factura_id: facturaIdsDelRemito.size === 1 ? [...facturaIdsDelRemito][0] : null })
+        .eq("id", remito);
     }
 
     if (facturaId && items.length > 0) {
@@ -298,7 +347,7 @@ function CargarFacturaInner() {
     setPercepciones(""); setRetenciones(""); setNoGravado(""); setFacturaOriginalId("");
     setActividad(""); setLabor(""); setRemito(""); setDolar(null); setPdfFile(null); setPdfUrl(null);
     setItems([]); setBusquedaItems({}); setMostrarDropdown({});
-    setCae(""); setCaeEstado("idle");
+    setCae(""); setCaeEstado("idle"); setCaeObservaciones([]);
   };
 
   const input: React.CSSProperties = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", marginTop: 6, fontSize: 14, boxSizing: "border-box" };
@@ -323,6 +372,7 @@ function CargarFacturaInner() {
                 <option value="">Seleccionar</option>
                 <option>Factura A</option><option>Factura B</option><option>Factura C</option>
                 <option>Nota de Crédito A</option><option>Nota de Crédito B</option><option>Nota de Crédito C</option>
+                <option>Nota de Débito A</option><option>Nota de Débito B</option><option>Nota de Débito C</option>
                 <option>Recibo</option><option>Otro</option>
               </select>
             </div>
@@ -331,7 +381,7 @@ function CargarFacturaInner() {
             <div><div style={lbl}>VENCIMIENTO</div><input type="date" value={fechaVto} onChange={(e) => setFechaVto(e.target.value)} style={input} /></div>
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={lbl}>PROVEEDOR *</div>
-              <select value={proveedorId} onChange={(e) => { setProveedorId(e.target.value); setCaeEstado("idle"); }} style={input}>
+              <select value={proveedorId} onChange={(e) => { setProveedorId(e.target.value); setCaeEstado("idle"); setCaeObservaciones([]); }} style={input}>
                 <option value="">Seleccionar proveedor</option>
                 {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razon_social}{p.cuit ? ` — ${p.cuit}` : ""}</option>)}
               </select>
@@ -342,7 +392,7 @@ function CargarFacturaInner() {
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                 <input
                   value={cae}
-                  onChange={(e) => { setCae(e.target.value); setCaeEstado("idle"); }}
+                  onChange={(e) => { setCae(e.target.value); setCaeEstado("idle"); setCaeObservaciones([]); }}
                   style={{ ...input, marginTop: 0, flex: 1 }}
                   placeholder="Ej: 71123456789012"
                 />
@@ -368,14 +418,23 @@ function CargarFacturaInner() {
               {caeEstado === "invalido" && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#c62828", background: "#ffebee", padding: "6px 12px", borderRadius: 6 }}>
                   ❌ CAE inválido o no encontrado en ARCA. Podés igualmente guardar la factura.
+                  {caeObservaciones.length > 0 && (
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                      {caeObservaciones.map((obs, i) => (
+                        <li key={i}>{obs}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {esNotaCredito && (
+          {esNota && (
             <div style={{ ...section, background: "#fff8e1", borderRadius: 8, padding: 16, marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>📎 Vincular a factura original</div>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>
+                📎 Vincular a factura original {esNotaDebito ? "(Nota de Débito)" : "(Nota de Crédito)"}
+              </div>
               <div style={lbl}>FACTURA ORIGINAL</div>
               <select value={facturaOriginalId} onChange={(e) => setFacturaOriginalId(e.target.value)} style={input}>
                 <option value="">Seleccionar factura</option>
@@ -601,11 +660,16 @@ function CargarFacturaInner() {
                     <option value="">Sin asociar</option>
                     {remitos
                       .filter(r => !filtroProveedorRemito || r.proveedor_id === filtroProveedorRemito)
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.fecha} — {r.proveedores?.razon_social || "Sin proveedor"} — {(r.stock_movimientos || []).map((m: any) => m.insumos?.nombre).filter(Boolean).join(", ")}
-                        </option>
-                      ))}
+                      .map((r) => {
+                        const pendientes = (r.stock_movimientos || []).filter((m: any) => !m.factura_id);
+                        const yaVinculados = (r.stock_movimientos || []).length - pendientes.length;
+                        return (
+                          <option key={r.id} value={r.id}>
+                            R-{String(r.numero).padStart(3, "0")} — {r.numero_remito || "Sin N°"} — {r.fecha} — {r.proveedores?.razon_social || "Sin proveedor"} — pendiente: {pendientes.map((m: any) => m.insumos?.nombre).filter(Boolean).join(", ")}
+                            {yaVinculados > 0 ? ` (${yaVinculados} línea(s) ya vinculadas a otra factura)` : ""}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
               </div>
@@ -727,6 +791,12 @@ function CargarFacturaInner() {
             <div style={{ background: "#fff3e0", borderRadius: 12, padding: 16, fontSize: 13, color: "#e65100" }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>⚠️ Nota de Crédito</div>
               Este comprobante reduce el saldo con el proveedor.
+            </div>
+          )}
+          {esNotaDebito && (
+            <div style={{ background: "#e3f2fd", borderRadius: 12, padding: 16, fontSize: 13, color: "#0d47a1" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>ℹ️ Nota de Débito</div>
+              Este comprobante aumenta el saldo con el proveedor.
             </div>
           )}
           <div style={{ background: "#fff8e1", borderRadius: 12, padding: 16, fontSize: 13, color: "#7c5c00" }}>

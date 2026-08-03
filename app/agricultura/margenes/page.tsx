@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+
+type DetalleInsumo = {
+  insumo_id: string;
+  nombre: string;
+  categoria: string;
+  unidad: string;
+  dosisPresu: number;
+  precioPresu: number;
+  costoPresuPorHa: number;
+  dosisReal: number;
+  precioReal: number;
+  costoRealPorHa: number;
+  tieneCompras: boolean;
+};
 
 export default function MargenesPage() {
   const [lotes, setLotes] = useState<any[]>([]);
@@ -30,6 +44,8 @@ export default function MargenesPage() {
   const [costoRealPorCategoria, setCostoRealPorCategoria] = useState<Record<string, number>>({});
   const [facturasLabores, setFacturasLabores] = useState<any[]>([]);
   const [cargandoFuturos, setCargandoFuturos] = useState(false);
+  const [detalleInsumos, setDetalleInsumos] = useState<DetalleInsumo[]>([]);
+  const [categoriaExpandida, setCategoriaExpandida] = useState<string | null>(null);
 
   const loteIdRef = useRef(loteId);
   useEffect(() => { loteIdRef.current = loteId; }, [loteId]);
@@ -60,7 +76,6 @@ export default function MargenesPage() {
     (preciosData || []).forEach((p: any) => { map[p.insumo_id] = p.precio; });
     setPreciosInsumos(map);
 
-    // Mezclar: si hay precio de Bolsa de Cereales, usarlo; si no, mantener el manual
     const futurosActualizados = (futuresData || []).map((f: any) => {
       const clave = f.cultivo?.toLowerCase();
       const deBolsa = futurosBolsa?.[clave];
@@ -81,12 +96,12 @@ export default function MargenesPage() {
     const queries: Promise<any>[] = [
       supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
       supabase.from("labores").select("*").eq("Lote_id", loteId),
-      supabase.from("stock_movimientos").select("insumo_id, cantidad, referencia_id, insumos(categoria, subcategoria)").eq("tipo", "salida").eq("motivo", "labor"),
-      supabase.from("factura_items").select("insumo_id, cantidad, precio_unitario, facturas!factura_items_factura_id_fkey(moneda, dolar)"),
+      supabase.from("stock_movimientos").select("insumo_id, cantidad, referencia_id, insumos(nombre, unidad, categoria, subcategoria)").eq("tipo", "salida").eq("motivo", "labor"),
+      supabase.from("factura_items").select("insumo_id, cantidad, precio_unitario, insumos(nombre), facturas!factura_items_factura_id_fkey(moneda, dolar)"),
     ];
 
     if (planId) {
-      queries.push(supabase.from("plan_items").select("*, insumos(nombre, categoria)").eq("plan_id", planId).order("orden") as any);
+      queries.push(supabase.from("plan_items").select("*, insumos(nombre, unidad, categoria)").eq("plan_id", planId).order("orden") as any);
     }
 
     const results = await Promise.all(queries);
@@ -123,6 +138,20 @@ export default function MargenesPage() {
       precioPromedio[insumoId] = datos.totalCantidad > 0 ? datos.totalValor / datos.totalCantidad : 0;
     }
 
+    // DEBUG: log de cada línea de factura que entra en el cálculo del precio
+    // real, para poder ver a mano si algún precio_unitario/cantidad/moneda
+    // está mal cargado sin tener que ir a buscarlo a Supabase.
+    console.table(
+      facturasItems.map((fi: any) => ({
+        insumo: fi.insumos?.nombre || fi.insumo_id,
+        cantidad: fi.cantidad,
+        precio_unitario: fi.precio_unitario,
+        moneda: fi.facturas?.moneda,
+        dolar: fi.facturas?.dolar,
+      }))
+    );
+    console.log("precio promedio calculado por insumo (USD):", precioPromedio);
+
     const costoInsumos = salidasLote.reduce((acc: number, s: any) => {
       const precio = precioPromedio[s.insumo_id] || 0;
       return acc + Number(s.cantidad) * precio;
@@ -134,6 +163,8 @@ export default function MargenesPage() {
       haPorLabor[l.id] = Number(l.hectareas) || 1;
     }
 
+    const cantidadRealPorInsumo: Record<string, number> = {};
+
     for (const s of salidasLote) {
       const precio = precioPromedio[s.insumo_id] || 0;
       const haLabor = haPorLabor[s.referencia_id] || 1;
@@ -141,6 +172,8 @@ export default function MargenesPage() {
       const categoria = (s.insumos?.subcategoria || s.insumos?.categoria || "OTRO").toUpperCase();
       if (!costoRealPorCat[categoria]) costoRealPorCat[categoria] = 0;
       costoRealPorCat[categoria] += costoporHa;
+
+      cantidadRealPorInsumo[s.insumo_id] = (cantidadRealPorInsumo[s.insumo_id] || 0) + Number(s.cantidad);
     }
 
     for (const f of facturasData || []) {
@@ -156,8 +189,58 @@ export default function MargenesPage() {
     setCostoRealPorCategoria(costoRealPorCat);
     setCostoInsumosLote(costoInsumos);
 
-    if (planId) setPlanItems(results[4]?.data || []);
-    else setPlanItems([]);
+    const planItemsData = planId ? (results[4]?.data || []) : [];
+    setPlanItems(planItemsData);
+
+    const haLote = Number(lotes.find(l => l.id === loteId)?.hectareas) || 0;
+
+    const detalle: Record<string, DetalleInsumo> = {};
+
+    for (const item of planItemsData) {
+      const dosisPresu = Number(item.cantidad_por_ha) || 0;
+      const precioPresu = preciosInsumos[item.insumo_id] || 0;
+      detalle[item.insumo_id] = {
+        insumo_id: item.insumo_id,
+        nombre: item.insumos?.nombre || "—",
+        categoria: (item.categoria || item.insumos?.categoria || "OTRO").toUpperCase(),
+        unidad: item.insumos?.unidad || "",
+        dosisPresu,
+        precioPresu,
+        costoPresuPorHa: dosisPresu * precioPresu,
+        dosisReal: 0,
+        precioReal: 0,
+        costoRealPorHa: 0,
+        tieneCompras: false,
+      };
+    }
+
+    for (const [insumoId, cantidadTotal] of Object.entries(cantidadRealPorInsumo)) {
+      const dosisReal = haLote > 0 ? cantidadTotal / haLote : 0;
+      const precioReal = precioPromedio[insumoId] || 0;
+      const movimiento = salidasLote.find((s: any) => s.insumo_id === insumoId);
+      if (!detalle[insumoId]) {
+        detalle[insumoId] = {
+          insumo_id: insumoId,
+          nombre: movimiento?.insumos?.nombre || "—",
+          categoria: (movimiento?.insumos?.subcategoria || movimiento?.insumos?.categoria || "OTRO").toUpperCase(),
+          unidad: movimiento?.insumos?.unidad || "",
+          dosisPresu: 0,
+          precioPresu: 0,
+          costoPresuPorHa: 0,
+          dosisReal,
+          precioReal,
+          costoRealPorHa: dosisReal * precioReal,
+          tieneCompras: precioReal > 0,
+        };
+      } else {
+        detalle[insumoId].dosisReal = dosisReal;
+        detalle[insumoId].precioReal = precioReal;
+        detalle[insumoId].costoRealPorHa = dosisReal * precioReal;
+        detalle[insumoId].tieneCompras = precioReal > 0;
+      }
+    }
+
+    setDetalleInsumos(Object.values(detalle).sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nombre.localeCompare(b.nombre)));
   };
 
   const guardarPrecioFuturo = async (cultivo: string) => {
@@ -201,6 +284,11 @@ export default function MargenesPage() {
   const precioGranoUSD = precioFuturo?.precio || 0;
 
   const categorias = ["COADYUVANTE", "COSECHA", "CURASEMILLA", "FERTILIZANTE", "FUNGICIDA", "HERBICIDA", "INSECTICIDA", "LABOR", "SEGURO", "SEMILLA", "OTRO"];
+  const detallePorCategoria: Record<string, DetalleInsumo[]> = {};
+  for (const d of detalleInsumos) {
+    if (!detallePorCategoria[d.categoria]) detallePorCategoria[d.categoria] = [];
+    detallePorCategoria[d.categoria].push(d);
+  }
   const costosPorCategoria: Record<string, number> = {};
   for (const cat of categorias) costosPorCategoria[cat] = 0;
   for (const item of planItems) {
@@ -239,6 +327,53 @@ export default function MargenesPage() {
 
   const costoRealPorHa = ha > 0 ? (costoFacturasLabores + costoInsumosLote) / ha : 0;
   const margenRealPorHa = ingresoRealPorHa - costoRealPorHa - arrendamientoPorHa;
+
+  // ── VALORES "EFECTIVOS" ──────────────────────────────────────────────────
+  // Un solo número por concepto: usa el real si ya hay compras/ventas
+  // cargadas, y si no, cae al presupuestado. Así el cuadro se va
+  // "autoactualizando" a medida que entran facturas y liquidaciones, sin
+  // tener que mirar dos columnas.
+  const costoEfectivoPorCategoria: Record<string, number> = {};
+  const estadoCategoria: Record<string, "real" | "parcial" | "presup"> = {};
+  for (const cat of categorias) {
+    const itemsCat = detallePorCategoria[cat] || [];
+    if (itemsCat.length > 0) {
+      // Suma ítem por ítem: cada insumo aporta su costo real si ya se compró,
+      // o el presupuestado si todavía no — así no se pierde lo presupuestado
+      // de los productos que faltan comprar dentro de la misma categoría.
+      costoEfectivoPorCategoria[cat] = itemsCat.reduce(
+        (acc, d) => acc + (d.tieneCompras ? d.costoRealPorHa : d.costoPresuPorHa), 0
+      );
+      const conReal = itemsCat.filter(d => d.tieneCompras).length;
+      estadoCategoria[cat] = conReal === 0 ? "presup" : conReal === itemsCat.length ? "real" : "parcial";
+    } else {
+      // Categorías sin desglose por insumo disponible (no debería pasar en
+      // condiciones normales): fallback al comportamiento anterior.
+      const real = costoRealPorCategoria[cat] || 0;
+      costoEfectivoPorCategoria[cat] = real > 0 ? real : (costosPorCategoria[cat] || 0);
+      estadoCategoria[cat] = real > 0 ? "real" : "presup";
+    }
+  }
+  const costoImplantacionEfectivo = categorias.reduce((acc, cat) => acc + (costoEfectivoPorCategoria[cat] || 0), 0);
+  const costoTotalEfectivo = costoImplantacionEfectivo + arrendamientoPorHa;
+
+  const esRendReal = rendReal > 0;
+  const rendimientoEfectivo = esRendReal ? rendReal : rendEsp;
+
+  const esIngresoReal = ingresoRealPorHa > 0;
+  const ingresoEfectivo = esIngresoReal ? ingresoRealPorHa : ingresoNetoPresup;
+
+  const margenEfectivo = ingresoEfectivo - costoTotalEfectivo;
+
+  const Badge = ({ estado }: { estado: "real" | "parcial" | "presup" }) => (
+    <span style={{
+      fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, marginLeft: 8,
+      background: estado === "real" ? "#e8f5e9" : estado === "parcial" ? "#fff8e1" : "#f0f0f0",
+      color: estado === "real" ? "#2e7d32" : estado === "parcial" ? "#f57f17" : "#999",
+    }}>
+      {estado === "real" ? "real" : estado === "parcial" ? "parcial" : "presup."}
+    </span>
+  );
 
   const input: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" };
   const lbl: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: "#888", letterSpacing: 0.5 };
@@ -363,35 +498,53 @@ export default function MargenesPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#0f1f17" }}>
-                <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700, width: "40%" }}>CONCEPTO</th>
-                <th style={{ textAlign: "right", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700 }}>PRESUPUESTO (USD/ha)</th>
-                <th style={{ textAlign: "right", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700 }}>REAL (USD/ha)</th>
-                <th style={{ textAlign: "right", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700 }}>DIF.</th>
+                <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700 }}>CONCEPTO</th>
+                <th style={{ textAlign: "right", padding: "12px 14px", fontSize: 12, color: "white", fontWeight: 700 }}>USD/ha</th>
               </tr>
             </thead>
             <tbody>
               {categorias.map(cat => (
-                costosPorCategoria[cat] > 0 ? (
-                  <tr key={cat} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                    <td style={{ padding: "8px 14px", fontSize: 13, color: "#555", paddingLeft: 24 }}>{cat}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costosPorCategoria[cat])}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>
-                      {costoRealPorCategoria[cat] > 0 ? `- ${fmtUSD(costoRealPorCategoria[cat])}` : "—"}
-                    </td>
-                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: costoRealPorCategoria[cat] > 0 ? colorDif(costoRealPorCategoria[cat] - costosPorCategoria[cat], false) : "#888" }}>
-                      {costoRealPorCategoria[cat] > 0 ? fmtDif(costoRealPorCategoria[cat] - costosPorCategoria[cat]) : "—"}
-                    </td>
-                  </tr>
+                (detallePorCategoria[cat]?.length > 0 || costoEfectivoPorCategoria[cat] > 0) ? (
+                  <React.Fragment key={cat}>
+                    <tr
+                      onClick={() => setCategoriaExpandida(v => v === cat ? null : cat)}
+                      style={{ borderBottom: "1px solid #f0f0f0", cursor: detallePorCategoria[cat]?.length ? "pointer" : "default", background: categoriaExpandida === cat ? "#f8f9fa" : "transparent" }}
+                    >
+                      <td style={{ padding: "8px 14px", fontSize: 13, color: "#555", paddingLeft: 24 }}>
+                        {detallePorCategoria[cat]?.length ? (categoriaExpandida === cat ? "▾ " : "▸ ") : ""}{cat}
+                      </td>
+                      <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: costoEfectivoPorCategoria[cat] > 0 ? "#c62828" : "#e65100" }}>
+                        {costoEfectivoPorCategoria[cat] > 0 ? `- ${fmtUSD(costoEfectivoPorCategoria[cat])}` : "⚠️ falta precio"}
+                        <Badge estado={estadoCategoria[cat]} />
+                      </td>
+                    </tr>
+                    {categoriaExpandida === cat && detallePorCategoria[cat]?.map((d) => {
+                      const valorEfectivo = d.tieneCompras ? d.costoRealPorHa : d.costoPresuPorHa;
+                      const dosisEfectiva = d.tieneCompras ? d.dosisReal : d.dosisPresu;
+                      const precioEfectivo = d.tieneCompras ? d.precioReal : d.precioPresu;
+                      return (
+                        <tr key={d.insumo_id} style={{ borderBottom: "1px solid #f5f5f5", background: "#fbfbf9" }}>
+                          <td style={{ padding: "7px 14px 7px 44px", fontSize: 12, color: "#555" }}>
+                            {d.nombre}
+                            <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>
+                              {dosisEfectiva > 0 ? `${dosisEfectiva.toLocaleString("es-AR", { maximumFractionDigits: 2 })} ${d.unidad}/ha` : "sin dosis"}
+                              {precioEfectivo > 0 ? ` · ${fmtUSD(precioEfectivo)}/${d.unidad || "u"}` : dosisEfectiva > 0 ? " · sin precio" : ""}
+                            </div>
+                          </td>
+                          <td style={{ padding: "7px 14px", fontSize: 12, textAlign: "right", color: valorEfectivo > 0 ? "#888" : "#e65100" }}>
+                            {valorEfectivo > 0 ? `- ${fmtUSD(valorEfectivo)}` : dosisEfectiva > 0 ? "falta precio" : "—"}
+                            <Badge estado={d.tieneCompras ? "real" : "presup"} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
                 ) : null
               ))}
 
               <tr style={{ borderBottom: "1px solid #f0f0f0", background: "#fff8e1" }}>
                 <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700 }}>COSTO DE IMPLANTACIÓN</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoImplantacion)}</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoRealPorHa)}</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, textAlign: "right", fontWeight: 700, color: colorDif(costoRealPorHa - costoImplantacion, false) }}>
-                  {costoImplantacion > 0 ? fmtDif(costoRealPorHa - costoImplantacion) : "—"}
-                </td>
+                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoImplantacionEfectivo)}</td>
               </tr>
 
               <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -399,104 +552,78 @@ export default function MargenesPage() {
                   ARRENDAMIENTO ({loteInfo.arriendo_quintales} qq × USD {(precioSojaFuturo / 10).toFixed(2)}/qq)
                 </td>
                 <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(arrendamientoPorHa)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(arrendamientoPorHa)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
               </tr>
 
               <tr style={{ borderBottom: "2px solid #eee", background: "#fce4ec" }}>
                 <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 800 }}>COSTO + ALQ</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 800, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoTotal)}</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 800, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoRealPorHa + arrendamientoPorHa)}</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, textAlign: "right", fontWeight: 700, color: colorDif((costoRealPorHa + arrendamientoPorHa) - costoTotal, false) }}>
-                  {costoTotal > 0 ? fmtDif((costoRealPorHa + arrendamientoPorHa) - costoTotal) : "—"}
-                </td>
+                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 800, textAlign: "right", color: "#c62828" }}>- {fmtUSD(costoTotalEfectivo)}</td>
               </tr>
 
               <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
                 <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>RENDIMIENTO (qq/ha)</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right" }}>{rendimientoEsperado || "—"}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right" }}>{rendimientoReal || "—"}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", fontWeight: 700, color: rendReal > 0 ? colorDif(rendReal - rendEsp, true) : "#888" }}>
-                  {rendimientoReal && rendimientoEsperado ? `${rendReal >= rendEsp ? "+" : ""}${(rendReal - rendEsp).toFixed(1)}` : "—"}
+                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right" }}>
+                  {rendimientoEfectivo || "—"}
+                  {rendimientoEfectivo > 0 && <Badge estado={esRendReal ? "real" : "presup"} />}
                 </td>
               </tr>
 
               <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
                 <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>PRECIO BRUTO (USD/tn)</td>
                 <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right" }}>USD {precioBruto.toFixed(2)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                <td style={{ padding: "8px 14px" }}></td>
               </tr>
 
-              {bon > 0 && (
-                <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>BONIFICACIÓN ({bon}%)</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#2e7d32" }}>+ {fmtUSD(precioBruto * bon / 100 * toneladasEsp)}</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                  <td style={{ padding: "8px 14px" }}></td>
-                </tr>
-              )}
-
-              <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>COMISIÓN ({com}%)</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(precioBruto * com / 100 * toneladasEsp)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                <td style={{ padding: "8px 14px" }}></td>
-              </tr>
-
-              <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>FLETE (USD/tn)</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(flt * toneladasEsp)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                <td style={{ padding: "8px 14px" }}></td>
-              </tr>
-
-              {otros > 0 && (
-                <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>OTROS GASTOS</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(otros)}</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                  <td style={{ padding: "8px 14px" }}></td>
-                </tr>
-              )}
-
-              <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>PRECIO NETO (USD/tn)</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", fontWeight: 600 }}>USD {precioNeto.toFixed(2)}</td>
-                <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                <td style={{ padding: "8px 14px" }}></td>
-              </tr>
-
-              {admin > 0 && (
-                <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>ADMINISTRACIÓN (USD/ha)</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(admin)}</td>
-                  <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#888" }}>—</td>
-                  <td style={{ padding: "8px 14px" }}></td>
-                </tr>
+              {/* Bonificación/comisión/flete/precio neto son la proyección de venta
+                  presupuestada; en cuanto hay una liquidación real cargada, esa
+                  cadena de supuestos deja de ser relevante y se muestra directo
+                  el ingreso neto real más abajo. */}
+              {!esIngresoReal && (
+                <>
+                  {bon > 0 && (
+                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>BONIFICACIÓN ({bon}%)</td>
+                      <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#2e7d32" }}>+ {fmtUSD(precioBruto * bon / 100 * toneladasEsp)}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>COMISIÓN ({com}%)</td>
+                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(precioBruto * com / 100 * toneladasEsp)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>FLETE (USD/tn)</td>
+                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(flt * toneladasEsp)}</td>
+                  </tr>
+                  {otros > 0 && (
+                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>OTROS GASTOS</td>
+                      <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(otros)}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>PRECIO NETO (USD/tn)</td>
+                    <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", fontWeight: 600 }}>USD {precioNeto.toFixed(2)}</td>
+                  </tr>
+                  {admin > 0 && (
+                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ padding: "8px 14px", fontSize: 13, color: "#555" }}>ADMINISTRACIÓN (USD/ha)</td>
+                      <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: "#c62828" }}>- {fmtUSD(admin)}</td>
+                    </tr>
+                  )}
+                </>
               )}
 
               <tr style={{ borderBottom: "1px solid #eee", background: "#e3f2fd" }}>
                 <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700 }}>INGRESO NETO</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: "#2e7d32" }}>{fmtUSD(ingresoNetoPresup)}</td>
-                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: ingresoRealPorHa > 0 ? "#2e7d32" : "#888" }}>
-                  {ingresoRealPorHa > 0 ? fmtUSD(ingresoRealPorHa) : "—"}
-                </td>
-                <td style={{ padding: "10px 14px", fontSize: 13, textAlign: "right", fontWeight: 700, color: ingresoRealPorHa > 0 ? colorDif(ingresoRealPorHa - ingresoNetoPresup, true) : "#888" }}>
-                  {ingresoRealPorHa > 0 ? fmtDif(ingresoRealPorHa - ingresoNetoPresup) : "—"}
+                <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textAlign: "right", color: "#2e7d32" }}>
+                  {fmtUSD(ingresoEfectivo)}
+                  <Badge estado={esIngresoReal ? "real" : "presup"} />
                 </td>
               </tr>
 
-              <tr style={{ background: margenPresup >= 0 ? "#e8f5e9" : "#ffebee" }}>
+              <tr style={{ background: margenEfectivo >= 0 ? "#e8f5e9" : "#ffebee" }}>
                 <td style={{ padding: "14px", fontSize: 15, fontWeight: 800 }}>MARGEN BRUTO</td>
-                <td style={{ padding: "14px", fontSize: 15, fontWeight: 800, textAlign: "right", color: margenPresup >= 0 ? "#2e7d32" : "#c62828" }}>
-                  {fmtUSD(margenPresup)}
-                </td>
-                <td style={{ padding: "14px", fontSize: 15, fontWeight: 800, textAlign: "right", color: margenRealPorHa >= 0 ? "#2e7d32" : "#c62828" }}>
-                  {ingresoRealPorHa > 0 ? fmtUSD(margenRealPorHa) : "—"}
-                </td>
-                <td style={{ padding: "14px", fontSize: 15, textAlign: "right", fontWeight: 800, color: ingresoRealPorHa > 0 ? colorDif(margenRealPorHa - margenPresup, true) : "#888" }}>
-                  {ingresoRealPorHa > 0 ? fmtDif(margenRealPorHa - margenPresup) : "—"}
+                <td style={{ padding: "14px", fontSize: 15, fontWeight: 800, textAlign: "right", color: margenEfectivo >= 0 ? "#2e7d32" : "#c62828" }}>
+                  {fmtUSD(margenEfectivo)}
+                  <Badge estado={esIngresoReal ? "real" : "presup"} />
                 </td>
               </tr>
             </tbody>
@@ -505,29 +632,19 @@ export default function MargenesPage() {
           {ha > 0 && (
             <div style={{ padding: 20, background: "#f8f9fa", borderTop: "2px solid #eee" }}>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>💰 Totales ({ha} ha)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div style={{ background: "white", borderRadius: 8, padding: 16 }}>
-                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>INVERSIÓN SIN ALQ.</div>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>USD {(costoImplantacion * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>INVERSIÓN TOTAL (con arriendo)</div>
+                  <div style={{ fontSize: 18, fontWeight: 800 }}>USD {(costoTotalEfectivo * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
                 </div>
-                <div style={{ background: "white", borderRadius: 8, padding: 16 }}>
-                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>INVERSIÓN CON ALQ.</div>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>USD {(costoTotal * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-                </div>
-                <div style={{ background: "white", borderRadius: 8, padding: 16 }}>
-                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>RESULTADO PRESUP. TOTAL</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: margenPresup >= 0 ? "#2e7d32" : "#c62828" }}>
-                    USD {(margenPresup * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                <div style={{ background: margenEfectivo >= 0 ? "#e8f5e9" : "#ffebee", borderRadius: 8, padding: 16 }}>
+                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>
+                    RESULTADO TOTAL {esIngresoReal ? "(real)" : "(presupuestado)"}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: margenEfectivo >= 0 ? "#2e7d32" : "#c62828" }}>
+                    USD {(margenEfectivo * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                {ingresoRealPorHa > 0 && (
-                  <div style={{ background: margenRealPorHa >= 0 ? "#e8f5e9" : "#ffebee", borderRadius: 8, padding: 16 }}>
-                    <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 4 }}>RESULTADO REAL TOTAL</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: margenRealPorHa >= 0 ? "#2e7d32" : "#c62828" }}>
-                      USD {(margenRealPorHa * ha).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}

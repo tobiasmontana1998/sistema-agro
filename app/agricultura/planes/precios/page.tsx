@@ -22,11 +22,15 @@ export default function PreciosInsumosPage() {
   const cargarDatos = async () => {
     const [{ data: insumosData }, { data: preciosData }] = await Promise.all([
       supabase.from("insumos").select().order("categoria").order("nombre"),
-      supabase.from("precios_insumos").select("*"),
+      // Traemos todo el historial ordenado por fecha desc para quedarnos
+      // con el registro más reciente por insumo (ver reduce de abajo).
+      supabase.from("precios_insumos").select("*").order("fecha_actualizacion", { ascending: false }).order("created_at", { ascending: false }),
     ]);
     setInsumos(insumosData || []);
     const preciosMap: Record<string, any> = {};
-    (preciosData || []).forEach(p => { preciosMap[p.insumo_id] = p; });
+    (preciosData || []).forEach(p => {
+      if (!(p.insumo_id in preciosMap)) preciosMap[p.insumo_id] = p; // el primero es el más reciente
+    });
     setPrecios(preciosMap);
   };
 
@@ -36,14 +40,20 @@ export default function PreciosInsumosPage() {
 
   const guardarTodo = async () => {
     setGuardando(true);
-    for (const [insumoId, precio] of Object.entries(editados)) {
-      if (precio === "") continue;
-      const existing = precios[insumoId];
-      if (existing) {
-        await supabase.from("precios_insumos").update({ precio: Number(precio), fecha_actualizacion: new Date().toISOString().split("T")[0] }).eq("id", existing.id);
-      } else {
-        await supabase.from("precios_insumos").insert([{ insumo_id: insumoId, precio: Number(precio), moneda: "USD", fecha_actualizacion: new Date().toISOString().split("T")[0] }]);
-      }
+    // precios_insumos es un HISTORIAL: cada cambio de precio se guarda como
+    // una fila nueva (nunca se pisa una existente). Así queda registro de
+    // cuánto valía cada insumo a lo largo del tiempo, para comparar contra
+    // lo que realmente se terminó pagando en cada factura.
+    const nuevasFilas = Object.entries(editados)
+      .filter(([, precio]) => precio !== "")
+      .map(([insumoId, precio]) => ({
+        insumo_id: insumoId,
+        precio: Number(precio),
+        moneda: "USD",
+        fecha_actualizacion: new Date().toISOString().split("T")[0],
+      }));
+    if (nuevasFilas.length > 0) {
+      await supabase.from("precios_insumos").insert(nuevasFilas);
     }
     await cargarDatos();
     setEditados({});
@@ -93,7 +103,7 @@ export default function PreciosInsumosPage() {
       </div>
 
       <div style={{ background: "#f0faf4", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: "#2e7d32" }}>
-        💡 Los precios que cargues acá se aplican automáticamente a todos los planes de cultivo.
+        💡 Los precios que cargues acá se aplican automáticamente a todos los planes de cultivo. Cada cambio queda guardado como historial — no se pierde el precio anterior.
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>

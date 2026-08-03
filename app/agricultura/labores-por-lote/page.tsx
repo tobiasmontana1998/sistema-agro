@@ -42,7 +42,18 @@ export default function LaboresPorLote() {
     if (laborExpandida === labor.id) { setLaborExpandida(null); return; }
     setLaborExpandida(labor.id);
     if (insumosLabor[labor.id]) return;
-    const { data } = await supabase.from("stock_movimientos").select("*, insumos(nombre, unidad)").eq("referencia_id", labor.id).eq("tipo", "egreso");
+
+    // OJO: saqué el filtro .eq("tipo", "egreso") a propósito para diagnosticar.
+    // Si acá aparecen filas con un valor de "tipo" distinto a "egreso" (por
+    // ejemplo "salida"), ese es el motivo de que no se vieran los insumos.
+    // Avisame qué valor de "tipo" trae el log y lo dejamos filtrado bien.
+    const { data, error } = await supabase
+      .from("stock_movimientos")
+      .select("*, insumos(nombre, unidad)")
+      .eq("referencia_id", labor.id);
+
+    console.log("insumos de labor", labor.id, "→", data, error);
+
     setInsumosLabor((prev) => ({ ...prev, [labor.id]: data || [] }));
   };
 
