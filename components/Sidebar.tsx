@@ -21,6 +21,8 @@ const navItems = [
       { href: "/control-gestion/proveedores", label: "Proveedores", icon: "🏢" },
       { href: "/control-gestion/liquidaciones", label: "Liquidaciones", icon: "🌾" },
       { href: "/control-gestion/aportes", label: "Aportes", icon: "💰" },
+      { href: "/control-gestion/contabilidad", label: "Contabilidad", icon: "📒" },
+      { href: "/control-gestion/pendientes", label: "Pendientes", icon: "⏳" },
     ],
   },
   {
@@ -144,4 +146,4 @@ export default function Sidebar() {
       {navContent}
     </div>
   );
-}
+}

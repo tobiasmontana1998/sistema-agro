@@ -24,6 +24,30 @@ const [cultivos, setCultivos] = useState<any[]>([]);
   const [insumosUsados, setInsumosUsados] = useState<{ id?: string; insumo_id: string; cantidad: string }[]>([]);
   const [fecha, setFecha] = useState("");
   const [hectareas, setHectareas] = useState("");
+
+  // ── Campaña ──────────────────────────────────────────────────────────────
+  // Si no se elige, la base de datos la asigna sola por la fecha (1/7 al 30/6).
+  // Los costos de la labor (insumos valuados + contratista) quedan imputados a
+  // lote + campaña, y de ahí sale el margen bruto.
+  const [campania, setCampania] = useState("");
+  const [campanias, setCampanias] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("campanias").select("id, nombre, desde, hasta").order("desde", { ascending: false })
+      .then(({ data }) => setCampanias(data || []));
+  }, []);
+  const campaniaDeFecha = (f: string) => campanias.find((c) => f && f >= c.desde && f <= c.hasta);
+
+  // ── Contratista ─────────────────────────────────────────────────────────
+  // Quién hizo la labor. Sirve para que, al cargar la factura del
+  // contratista, aparezcan sus labores para vincular. "Labor propia" = hecha
+  // con maquinaria propia: no lleva factura y no aparece como pendiente.
+  const [contratista, setContratista] = useState("");
+  const [laborPropia, setLaborPropia] = useState(false);
+  const [contratistas, setContratistas] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("proveedores").select("id, razon_social").eq("activo", true).order("razon_social")
+      .then(({ data }) => setContratistas(data || []));
+  }, []);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -36,12 +60,16 @@ const [cultivos, setCultivos] = useState<any[]>([]);
   supabase.from("cultivos").select("id, nombre"),
 ]);
 setCultivos(cultivosData || []);
+      setLotes(lotesData || []);
       setInsumos(insumosData || []);
       if (laborData) {
         setTipo(laborData.Tipo || "");
         setLote(laborData.Lote_id || "");
         setCultivo(laborData.Cultivo_id || "");
         setFecha(laborData.Fecha || "");
+        setCampania(laborData.campania_id || "");
+        setContratista(laborData.contratista_id || "");
+        setLaborPropia(!!laborData.labor_propia);
         setHectareas(laborData.hectareas?.toString() || "");
         const costoTotal = laborData.Costo_total || 0;
         const ha = laborData.hectareas || 1;
@@ -73,6 +101,9 @@ setCultivos(cultivosData || []);
       Fecha: fecha,
       Costo_total: costoTotal,
       hectareas: hectareas ? Number(hectareas) : null,
+      campania_id: campania || null,
+      contratista_id: contratista || null,
+      labor_propia: laborPropia,
     }).eq("id", id);
 
     // Eliminar movimientos viejos y recrear
@@ -86,6 +117,7 @@ setCultivos(cultivosData || []);
           cantidad: Number(item.cantidad),
           motivo: "labor",
           referencia_id: id,
+          fecha,
           observaciones: `Labor: ${tipo} - Lote: ${lote}`,
         }]);
       }
@@ -122,6 +154,24 @@ setCultivos(cultivosData || []);
           <div>
             <div style={lbl}>FECHA *</div>
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={input} />
+          </div>
+          <div>
+            <div style={lbl}>CAMPAÑA</div>
+            <select value={campania} onChange={(e) => setCampania(e.target.value)} style={input}>
+              <option value="">Automática según la fecha{campaniaDeFecha(fecha) ? ` (${campaniaDeFecha(fecha)?.nombre})` : ""}</option>
+              {campanias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={lbl}>CONTRATISTA</div>
+            <select value={contratista} onChange={(e) => { setContratista(e.target.value); if (e.target.value) setLaborPropia(false); }} style={input} disabled={laborPropia}>
+              <option value="">{laborPropia ? "— Labor propia —" : "Seleccionar"}</option>
+              {contratistas.map((p) => <option key={p.id} value={p.id}>{p.razon_social}</option>)}
+            </select>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginTop: 6, color: "#555", cursor: "pointer" }}>
+              <input type="checkbox" checked={laborPropia} onChange={(e) => { setLaborPropia(e.target.checked); if (e.target.checked) setContratista(""); }} />
+              Labor propia (sin contratista, sin factura)
+            </label>
           </div>
           <div>
             <div style={lbl}>CULTIVO</div>
@@ -203,4 +253,4 @@ setCultivos(cultivosData || []);
       </div>
     </div>
   );
-}
+}

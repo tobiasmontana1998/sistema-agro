@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# certificados y claves de ARCA: NUNCA al repo
+*.key
+*.crt
+*.csr
+*.pem
+*.p12
+*.zip

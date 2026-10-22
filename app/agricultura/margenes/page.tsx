@@ -22,6 +22,14 @@ type DetalleInsumo = {
   tieneCompras: boolean;
 };
 
+// Trazabilidad de un insumo dentro del lote/campaña:
+//   aplicaciones → en qué labores se usó y a qué costo
+//   compras      → de qué remitos/facturas sale ese costo
+type Traza = {
+  aplicaciones: { laborId: string; fecha: string; tipo: string; cantidad: number; costoUnitUSD: number; origen: string }[];
+  compras: { fecha: string; remito: string; facturaId: string | null; factura: string; proveedor: string; cantidad: number; costoUnitUSD: number; origen: string }[];
+};
+
 export default function MargenesPage() {
   const [lotes, setLotes] = useState<any[]>([]);
   const [loteId, setLoteId] = useState("");
@@ -46,6 +54,11 @@ export default function MargenesPage() {
   const [cargandoFuturos, setCargandoFuturos] = useState(false);
   const [detalleInsumos, setDetalleInsumos] = useState<DetalleInsumo[]>([]);
   const [categoriaExpandida, setCategoriaExpandida] = useState<string | null>(null);
+  // Campaña: los costos reales salen de las labores de ese lote en esa campaña
+  const [campanias, setCampanias] = useState<any[]>([]);
+  const [campaniaId, setCampaniaId] = useState("");
+  const [trazas, setTrazas] = useState<Record<string, Traza>>({});
+  const [insumoTraza, setInsumoTraza] = useState<string | null>(null);
 
   const loteIdRef = useRef(loteId);
   useEffect(() => { loteIdRef.current = loteId; }, [loteId]);
@@ -60,10 +73,16 @@ export default function MargenesPage() {
     else setRendimientoEsperado("");
     if (lote?.rendimiento_real) setRendimientoReal(lote.rendimiento_real.toString());
     else setRendimientoReal("");
-    cargarDatosLote(loteId, lote?.plan_id);
-  }, [loteId, lotes]);
+    cargarDatosLote(loteId, lote?.plan_id, campaniaId);
+  }, [loteId, lotes, campaniaId]);
 
   const cargarDatos = async () => {
+    const { data: camps } = await supabase.from("campanias").select("id, nombre, desde, hasta").order("desde", { ascending: false });
+    setCampanias(camps || []);
+    const hoy = new Date().toISOString().slice(0, 10);
+    const actual = (camps || []).find((c: any) => hoy >= c.desde && hoy <= c.hasta);
+    if (actual) setCampaniaId((prev) => prev || actual.id);
+
     const [{ data: lotesData }, { data: preciosData }, { data: futuresData }, futurosBolsa] = await Promise.all([
       supabase.from("lotes").select("*"),
       supabase.from("precios_insumos").select("*"),
@@ -92,70 +111,92 @@ export default function MargenesPage() {
     setPreciosFuturos(futurosActualizados);
   };
 
-  const cargarDatosLote = async (loteId: string, planId: string | null) => {
+  const cargarDatosLote = async (loteId: string, planId: string | null, campId: string) => {
+    const camp = campanias.find((c) => c.id === campId);
+
+    // Labores del lote (de la campaña elegida)
+    let qLabores = supabase.from("labores").select("*").eq("Lote_id", loteId);
+    if (campId) qLabores = qLabores.eq("campania_id", campId);
+
     const queries: Promise<any>[] = [
       supabase.from("liquidaciones_venta").select("*").eq("lote_id", loteId) as any,
-      supabase.from("labores").select("*").eq("Lote_id", loteId),
-      supabase.from("stock_movimientos").select("insumo_id, cantidad, referencia_id, insumos(nombre, unidad, categoria, subcategoria)").eq("tipo", "salida").eq("motivo", "labor"),
-      supabase.from("factura_items").select("insumo_id, cantidad, precio_unitario, insumos(nombre), facturas!factura_items_factura_id_fkey(moneda, dolar)"),
+      qLabores as any,
     ];
-
     if (planId) {
       queries.push(supabase.from("plan_items").select("*, insumos(nombre, unidad, categoria)").eq("plan_id", planId).order("orden") as any);
     }
-
     const results = await Promise.all(queries);
 
     const laboresData = results[1].data || [];
     const laborIds = laboresData.map((l: any) => l.id);
 
-    const { data: facturasData } = laborIds.length > 0
-      ? await supabase.from("facturas").select("id, Monto, monto_neto, monto_usd, dolar, moneda, Labor_id").in("Labor_id", laborIds)
-      : { data: [] };
+    // Insumos aplicados en esas labores, con el COSTO VALUADO por el sistema
+    // (promedio ponderado en USD a la fecha de cada labor, desde las facturas).
+    const [{ data: facturasData }, { data: salidasData }] = await Promise.all([
+      laborIds.length > 0
+        // Costo de contratista por labor: si una factura cubre varias labores,
+        // la vista ya trae la parte de cada una (reparto por hectárea), en USD.
+        ? supabase.from("v_contratista_por_labor").select("labor_id, factura_id, numero_factura, contratista, ha, usd").in("labor_id", laborIds)
+        : Promise.resolve({ data: [] as any[] }),
+      laborIds.length > 0
+        ? supabase.from("stock_movimientos").select("id, insumo_id, cantidad, referencia_id, costo_unit_usd, costo_origen, insumos(nombre, unidad, categoria, subcategoria)")
+            .eq("tipo", "salida").eq("motivo", "labor").in("referencia_id", laborIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
 
     setFacturasLabores(facturasData || []);
-    setLiquidaciones(results[0].data || []);
+    // Ventas: si hay campaña, solo las liquidaciones dentro de sus fechas
+    setLiquidaciones((results[0].data || []).filter((l: any) => !camp || (l.fecha >= camp.desde && l.fecha <= camp.hasta)));
     setLabores(laboresData);
 
-    const laboresDelLote = laborIds;
-    const todasSalidas = results[2].data || [];
-    const salidasLote = todasSalidas.filter((s: any) => laboresDelLote.includes(s.referencia_id));
+    const salidasLote = salidasData || [];
 
-    const facturasItems = results[3].data || [];
-
-    const totalesPorInsumo: Record<string, { totalValor: number; totalCantidad: number }> = {};
-    for (const fi of facturasItems) {
-      const moneda = fi.facturas?.moneda || "ARS";
-      const dolar = Number(fi.facturas?.dolar || 1);
-      const precioUSD = moneda === "USD" ? Number(fi.precio_unitario) : Number(fi.precio_unitario) / dolar;
-      if (!totalesPorInsumo[fi.insumo_id]) totalesPorInsumo[fi.insumo_id] = { totalValor: 0, totalCantidad: 0 };
-      totalesPorInsumo[fi.insumo_id].totalValor += precioUSD * Number(fi.cantidad);
-      totalesPorInsumo[fi.insumo_id].totalCantidad += Number(fi.cantidad);
+    // Precio real por insumo = costo valuado promedio de lo aplicado en este lote
+    const valorPorInsumo: Record<string, { valor: number; cant: number; sinPrecio: boolean }> = {};
+    for (const s of salidasLote) {
+      const k = String(s.insumo_id);
+      if (!valorPorInsumo[k]) valorPorInsumo[k] = { valor: 0, cant: 0, sinPrecio: false };
+      valorPorInsumo[k].valor += Number(s.cantidad) * Number(s.costo_unit_usd || 0);
+      valorPorInsumo[k].cant += Number(s.cantidad);
+      if (s.costo_origen === "sin_precio" || !Number(s.costo_unit_usd)) valorPorInsumo[k].sinPrecio = true;
     }
-
     const precioPromedio: Record<string, number> = {};
-    for (const [insumoId, datos] of Object.entries(totalesPorInsumo)) {
-      precioPromedio[insumoId] = datos.totalCantidad > 0 ? datos.totalValor / datos.totalCantidad : 0;
+    for (const [k, v] of Object.entries(valorPorInsumo)) precioPromedio[k] = v.cant > 0 ? v.valor / v.cant : 0;
+
+    const costoInsumos = salidasLote.reduce((acc: number, s: any) => acc + Number(s.cantidad) * Number(s.costo_unit_usd || 0), 0);
+
+    // ── Trazabilidad: labores donde se aplicó y compras (remito → factura) ──
+    const insumoIds = Object.keys(valorPorInsumo);
+    const { data: entradas } = insumoIds.length > 0
+      ? await supabase.from("stock_movimientos")
+          .select("id, insumo_id, cantidad, fecha, costo_unit_usd, costo_origen, factura_id, remito_id, numero_remito, remitos(numero, numero_remito, factura_id)")
+          .eq("tipo", "entrada").in("insumo_id", insumoIds).order("fecha")
+      : { data: [] as any[] };
+    const factIds = [...new Set((entradas || []).map((e: any) => e.factura_id || e.remitos?.factura_id).filter(Boolean))];
+    const { data: factsTraza } = factIds.length > 0
+      ? await supabase.from("facturas").select("id, Numero_factura, proveedores(razon_social)").in("id", factIds)
+      : { data: [] as any[] };
+    const factMap = Object.fromEntries((factsTraza || []).map((f: any) => [String(f.id), f]));
+    const laborMap = Object.fromEntries(laboresData.map((l: any) => [String(l.id), l]));
+    const tz: Record<string, Traza> = {};
+    for (const k of insumoIds) tz[k] = { aplicaciones: [], compras: [] };
+    for (const s of salidasLote) {
+      const l = laborMap[String(s.referencia_id)];
+      tz[String(s.insumo_id)].aplicaciones.push({
+        laborId: String(s.referencia_id), fecha: l?.Fecha || "", tipo: l?.Tipo || "Labor",
+        cantidad: Number(s.cantidad), costoUnitUSD: Number(s.costo_unit_usd || 0), origen: s.costo_origen || "",
+      });
     }
-
-    // DEBUG: log de cada línea de factura que entra en el cálculo del precio
-    // real, para poder ver a mano si algún precio_unitario/cantidad/moneda
-    // está mal cargado sin tener que ir a buscarlo a Supabase.
-    console.table(
-      facturasItems.map((fi: any) => ({
-        insumo: fi.insumos?.nombre || fi.insumo_id,
-        cantidad: fi.cantidad,
-        precio_unitario: fi.precio_unitario,
-        moneda: fi.facturas?.moneda,
-        dolar: fi.facturas?.dolar,
-      }))
-    );
-    console.log("precio promedio calculado por insumo (USD):", precioPromedio);
-
-    const costoInsumos = salidasLote.reduce((acc: number, s: any) => {
-      const precio = precioPromedio[s.insumo_id] || 0;
-      return acc + Number(s.cantidad) * precio;
-    }, 0);
+    for (const e of entradas || []) {
+      const fid = e.factura_id || e.remitos?.factura_id || null;
+      const f = fid ? factMap[String(fid)] : null;
+      tz[String(e.insumo_id)]?.compras.push({
+        fecha: e.fecha || "", remito: e.remitos?.numero_remito || e.numero_remito || (e.remitos?.numero ? `R-${String(e.remitos.numero).padStart(3, "0")}` : "s/n"),
+        facturaId: fid ? String(fid) : null, factura: f?.Numero_factura || "sin factura", proveedor: f?.proveedores?.razon_social || "",
+        cantidad: Number(e.cantidad), costoUnitUSD: Number(e.costo_unit_usd || 0), origen: e.costo_origen || "",
+      });
+    }
+    setTrazas(tz);
 
     const costoRealPorCat: Record<string, number> = {};
     const haPorLabor: Record<string, number> = {};
@@ -166,9 +207,8 @@ export default function MargenesPage() {
     const cantidadRealPorInsumo: Record<string, number> = {};
 
     for (const s of salidasLote) {
-      const precio = precioPromedio[s.insumo_id] || 0;
       const haLabor = haPorLabor[s.referencia_id] || 1;
-      const costoporHa = (Number(s.cantidad) * precio) / haLabor;
+      const costoporHa = (Number(s.cantidad) * Number(s.costo_unit_usd || 0)) / haLabor;
       const categoria = (s.insumos?.subcategoria || s.insumos?.categoria || "OTRO").toUpperCase();
       if (!costoRealPorCat[categoria]) costoRealPorCat[categoria] = 0;
       costoRealPorCat[categoria] += costoporHa;
@@ -177,9 +217,8 @@ export default function MargenesPage() {
     }
 
     for (const f of facturasData || []) {
-      const montoBase = f.monto_neto || f.Monto || 0;
-      const usdTotal = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
-      const laborAsociada = laboresData.find((l: any) => l.id === f.Labor_id);
+      const usdTotal = Number(f.usd || 0);
+      const laborAsociada = laboresData.find((l: any) => String(l.id) === String(f.labor_id));
       const haLabor = Number(laborAsociada?.hectareas) || 1;
       const costoporHa = usdTotal / haLabor;
       if (!costoRealPorCat["LABOR"]) costoRealPorCat["LABOR"] = 0;
@@ -189,7 +228,7 @@ export default function MargenesPage() {
     setCostoRealPorCategoria(costoRealPorCat);
     setCostoInsumosLote(costoInsumos);
 
-    const planItemsData = planId ? (results[4]?.data || []) : [];
+    const planItemsData = planId ? (results[2]?.data || []) : [];
     setPlanItems(planItemsData);
 
     const haLote = Number(lotes.find(l => l.id === loteId)?.hectareas) || 0;
@@ -230,13 +269,13 @@ export default function MargenesPage() {
           dosisReal,
           precioReal,
           costoRealPorHa: dosisReal * precioReal,
-          tieneCompras: precioReal > 0,
+          tieneCompras: precioReal > 0 && !valorPorInsumo[insumoId]?.sinPrecio,
         };
       } else {
         detalle[insumoId].dosisReal = dosisReal;
         detalle[insumoId].precioReal = precioReal;
         detalle[insumoId].costoRealPorHa = dosisReal * precioReal;
-        detalle[insumoId].tieneCompras = precioReal > 0;
+        detalle[insumoId].tieneCompras = precioReal > 0 && !valorPorInsumo[insumoId]?.sinPrecio;
       }
     }
 
@@ -319,11 +358,9 @@ export default function MargenesPage() {
 
   const ingresoRealPorHa = ha > 0 ? liquidaciones.reduce((acc, l) => acc + (l.monto_neto || 0), 0) / ha : 0;
 
-  const costoFacturasLabores = facturasLabores.reduce((acc, f) => {
-    const montoBase = f.monto_neto || f.Monto || 0;
-    const usd = f.moneda === "USD" ? montoBase : montoBase / (f.dolar || 1);
-    return acc + usd;
-  }, 0);
+  // Costo de contratistas del lote (USD): parte de cada factura que le toca a
+  // cada labor del lote. Antes las facturas en USD se tomaban en pesos.
+  const costoFacturasLabores = facturasLabores.reduce((acc, f) => acc + Number(f.usd || 0), 0);
 
   const costoRealPorHa = ha > 0 ? (costoFacturasLabores + costoInsumosLote) / ha : 0;
   const margenRealPorHa = ingresoRealPorHa - costoRealPorHa - arrendamientoPorHa;
@@ -354,6 +391,22 @@ export default function MargenesPage() {
       estadoCategoria[cat] = real > 0 ? "real" : "presup";
     }
   }
+  // ── LABORES HECHAS en el lote (campaña elegida) con su costo de contratista ──
+  const laboresHechas = [...labores]
+    .sort((a: any, b: any) => String(a.Fecha || "").localeCompare(String(b.Fecha || "")))
+    .map((l: any) => {
+      const fs = facturasLabores.filter((f: any) => String(f.labor_id) === String(l.id));
+      const usd = fs.reduce((a: number, f: any) => a + Number(f.usd || 0), 0);
+      const haL = Number(l.hectareas) || 0;
+      return { ...l, usd, usdHa: haL > 0 ? usd / haL : 0, facturas: fs };
+    });
+  const costoLaborReal = laboresHechas.reduce((a: number, l: any) => a + l.usdHa, 0);
+  if (costoLaborReal > 0) {
+    costoEfectivoPorCategoria["LABOR"] = costoLaborReal;
+    estadoCategoria["LABOR"] = laboresHechas.some((l: any) => !l.labor_propia && l.usd === 0) ? "parcial" : "real";
+  }
+  const expandible = (cat: string) => (detallePorCategoria[cat]?.length || 0) > 0 || (cat === "LABOR" && laboresHechas.length > 0);
+
   const costoImplantacionEfectivo = categorias.reduce((acc, cat) => acc + (costoEfectivoPorCategoria[cat] || 0), 0);
   const costoTotalEfectivo = costoImplantacionEfectivo + arrendamientoPorHa;
 
@@ -385,7 +438,10 @@ export default function MargenesPage() {
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>📊 Márgenes por Lote</h1>
-        <p style={{ margin: "4px 0 0", color: "#888", fontSize: 14 }}>Margen bruto presupuestado vs real.</p>
+        <p style={{ margin: "4px 0 0", color: "#888", fontSize: 14 }}>
+          Margen bruto presupuestado vs real. El costo real de cada insumo sale del costeo del stock
+          (precio de factura, promedio ponderado en USD a la fecha de cada labor). Tocá un insumo para ver de dónde sale.
+        </p>
       </div>
 
       {/* Precios futuros */}
@@ -449,12 +505,19 @@ export default function MargenesPage() {
 
       {/* Selector de lote */}
       <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: 24, marginBottom: 24 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: 16, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: 16, alignItems: "end" }}>
           <div>
             <div style={lbl}>LOTE</div>
             <select value={loteId} onChange={(e) => setLoteId(e.target.value)} style={{ ...input, marginTop: 4 }}>
               <option value="">Seleccionar lote</option>
               {lotes.map(l => <option key={l.id} value={l.id}>{l.nombre} — {l.cultivo_activo || "Sin cultivo"} — {l.hectareas || "?"} ha</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={lbl}>CAMPAÑA</div>
+            <select value={campaniaId} onChange={(e) => setCampaniaId(e.target.value)} style={{ ...input, marginTop: 4 }}>
+              <option value="">Todas</option>
+              {campanias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
           {loteInfo && (
@@ -504,14 +567,14 @@ export default function MargenesPage() {
             </thead>
             <tbody>
               {categorias.map(cat => (
-                (detallePorCategoria[cat]?.length > 0 || costoEfectivoPorCategoria[cat] > 0) ? (
+                (detallePorCategoria[cat]?.length > 0 || costoEfectivoPorCategoria[cat] > 0 || (cat === "LABOR" && laboresHechas.length > 0)) ? (
                   <React.Fragment key={cat}>
                     <tr
                       onClick={() => setCategoriaExpandida(v => v === cat ? null : cat)}
-                      style={{ borderBottom: "1px solid #f0f0f0", cursor: detallePorCategoria[cat]?.length ? "pointer" : "default", background: categoriaExpandida === cat ? "#f8f9fa" : "transparent" }}
+                      style={{ borderBottom: "1px solid #f0f0f0", cursor: expandible(cat) ? "pointer" : "default", background: categoriaExpandida === cat ? "#f8f9fa" : "transparent" }}
                     >
                       <td style={{ padding: "8px 14px", fontSize: 13, color: "#555", paddingLeft: 24 }}>
-                        {detallePorCategoria[cat]?.length ? (categoriaExpandida === cat ? "▾ " : "▸ ") : ""}{cat}
+                        {expandible(cat) ? (categoriaExpandida === cat ? "▾ " : "▸ ") : ""}{cat}
                       </td>
                       <td style={{ padding: "8px 14px", fontSize: 13, textAlign: "right", color: costoEfectivoPorCategoria[cat] > 0 ? "#c62828" : "#e65100" }}>
                         {costoEfectivoPorCategoria[cat] > 0 ? `- ${fmtUSD(costoEfectivoPorCategoria[cat])}` : "⚠️ falta precio"}
@@ -523,9 +586,12 @@ export default function MargenesPage() {
                       const dosisEfectiva = d.tieneCompras ? d.dosisReal : d.dosisPresu;
                       const precioEfectivo = d.tieneCompras ? d.precioReal : d.precioPresu;
                       return (
-                        <tr key={d.insumo_id} style={{ borderBottom: "1px solid #f5f5f5", background: "#fbfbf9" }}>
+                        <React.Fragment key={d.insumo_id}>
+                        <tr style={{ borderBottom: "1px solid #f5f5f5", background: "#fbfbf9", cursor: trazas[d.insumo_id] ? "pointer" : "default" }}
+                          onClick={() => trazas[d.insumo_id] && setInsumoTraza(v => v === d.insumo_id ? null : d.insumo_id)}>
                           <td style={{ padding: "7px 14px 7px 44px", fontSize: 12, color: "#555" }}>
                             {d.nombre}
+                            {trazas[d.insumo_id] && <span style={{ marginLeft: 6, fontSize: 10, color: "#1565c0" }}>{insumoTraza === d.insumo_id ? "▾ ocultar origen" : "▸ ver de dónde sale"}</span>}
                             <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>
                               {dosisEfectiva > 0 ? `${dosisEfectiva.toLocaleString("es-AR", { maximumFractionDigits: 2 })} ${d.unidad}/ha` : "sin dosis"}
                               {precioEfectivo > 0 ? ` · ${fmtUSD(precioEfectivo)}/${d.unidad || "u"}` : dosisEfectiva > 0 ? " · sin precio" : ""}
@@ -536,8 +602,71 @@ export default function MargenesPage() {
                             <Badge estado={d.tieneCompras ? "real" : "presup"} />
                           </td>
                         </tr>
+                        {insumoTraza === d.insumo_id && trazas[d.insumo_id] && (
+                          <tr style={{ background: "#f4f8fd" }}>
+                            <td colSpan={2} style={{ padding: "8px 14px 12px 60px", fontSize: 11, color: "#555" }}>
+                              <div style={{ fontWeight: 700, color: "#1565c0", marginBottom: 4 }}>🚜 Aplicado en</div>
+                              {trazas[d.insumo_id].aplicaciones.map((a, i) => (
+                                <div key={i}>
+                                  <a href={`/agricultura/labores-por-lote/editar/${a.laborId}`} style={{ color: "#333" }}>{a.fecha} · {a.tipo}</a>
+                                  {" — "}{a.cantidad.toLocaleString("es-AR", { maximumFractionDigits: 2 })} {d.unidad} × {fmtUSD(a.costoUnitUSD)}
+                                  {" = "}<strong>{fmtUSD(a.cantidad * a.costoUnitUSD)}</strong>
+                                  {a.origen === "sin_precio" && <span style={{ color: "#c62828" }}> (sin precio)</span>}
+                                </div>
+                              ))}
+                              <div style={{ fontWeight: 700, color: "#1565c0", margin: "8px 0 4px" }}>📦 Comprado en (forma el costo promedio)</div>
+                              {trazas[d.insumo_id].compras.length === 0 && <div style={{ color: "#c62828" }}>Sin entradas de stock para este insumo.</div>}
+                              {trazas[d.insumo_id].compras.map((c, i) => (
+                                <div key={i}>
+                                  {c.fecha} · Remito {c.remito} → {c.facturaId
+                                    ? <a href={`/control-gestion/facturas?id=${c.facturaId}`} style={{ color: "#333" }}>Factura {c.factura}</a>
+                                    : <a href="/control-gestion/pendientes" style={{ color: "#c62828" }}>sin factura</a>}
+                                  {c.proveedor ? ` (${c.proveedor})` : ""}
+                                  {" — "}{c.cantidad.toLocaleString("es-AR", { maximumFractionDigits: 2 })} {d.unidad} × {fmtUSD(c.costoUnitUSD)}
+                                  {c.origen === "provisorio" && <span style={{ color: "#e65100" }}> (provisorio)</span>}
+                                  {c.origen === "sin_precio" && <span style={{ color: "#c62828" }}> (sin precio)</span>}
+                                </div>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
+                    {categoriaExpandida === cat && cat === "LABOR" && laboresHechas.length > 0 && (
+                      <>
+                        <tr style={{ background: "#fbfbf9" }}>
+                          <td colSpan={2} style={{ padding: "8px 14px 4px 44px", fontSize: 11, fontWeight: 700, color: "#1565c0" }}>
+                            🚜 Labores hechas en el lote
+                          </td>
+                        </tr>
+                        {laboresHechas.map((l: any) => (
+                          <tr key={l.id} style={{ borderBottom: "1px solid #f5f5f5", background: "#fbfbf9" }}>
+                            <td style={{ padding: "6px 14px 6px 44px", fontSize: 12, color: "#555" }}>
+                              <a href={`/agricultura/labores-por-lote/editar/${l.id}`} style={{ color: "#333" }}>
+                                {l.Fecha} · {l.Tipo}
+                              </a>
+                              <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>
+                                {Number(l.hectareas || 0).toLocaleString("es-AR")} ha
+                                {l.facturas.length > 0
+                                  ? <> · {l.facturas.map((f: any, i: number) => (
+                                      <span key={i}>{i > 0 ? ", " : ""}{f.contratista || "Contratista"} — <a href={`/control-gestion/facturas?id=${f.factura_id}`} style={{ color: "#888" }}>Fact. {f.numero_factura}</a></span>
+                                    ))} · {fmtUSD(l.usd)} total</>
+                                  : l.labor_propia ? " · labor propia" : ""}
+                              </div>
+                            </td>
+                            <td style={{ padding: "6px 14px", fontSize: 12, textAlign: "right", color: l.usd > 0 ? "#888" : l.labor_propia ? "#999" : "#e65100" }}>
+                              {l.usd > 0
+                                ? `- ${fmtUSD(l.usdHa)}`
+                                : l.labor_propia
+                                  ? "propia"
+                                  : <a href="/control-gestion/pendientes" style={{ color: "#e65100" }}>sin factura</a>}
+                              {l.usd > 0 && <Badge estado="real" />}
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    )}
                   </React.Fragment>
                 ) : null
               ))}
@@ -652,4 +781,4 @@ export default function MargenesPage() {
       )}
     </div>
   );
-}
+}
